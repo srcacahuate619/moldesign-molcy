@@ -42,6 +42,9 @@ if '--cierre' in argv:
     i = argv.index('--cierre')
     CIERRE = argv[i + 1] if i + 1 < len(argv) else ''
     argv = argv[:i] + argv[i + 2:]
+if not CIERRE:
+    # El cierre de MolDesign es obligatorio en todo video: sin el no se codifica nada.
+    raise SystemExit('SIN_CIERRE: el cierre de MolDesign es obligatorio en todo video (--cierre <carpeta>)')
 #: Fotogramas del fundido a negro del video antes del cierre, que a su vez
 #: nace del negro: el empalme es un «dip to black», no un corte.
 FUNDIDO = 8

@@ -107,12 +107,14 @@ if ($pngs -lt $esperados) { Fallo "MAESTRO_SIN_RENDER($pngs/$esperados)" }
 Estado 'MAESTRO_OK'
 
 # El cierre de marca: se rinde la primera vez por formato (unos minutos) y se
-# reutiliza mientras su huella no cambie. El acta dice si este video lo lleva
-# (formato.cierre_s; el interruptor de la interfaz lo pone a 0).
+# reutiliza mientras su huella no cambie. Es OBLIGATORIO en todo video: no hay
+# interruptor que lo quite, y un acta que no lo declare (cierre_s < 3 s) no se
+# codifica ni se entrega.
 $cierreDir = ''
 $cierreManifiesto = ''
 $cierreS = 0.0
 try { $cierreS = [double]$acta.formato.cierre_s } catch { $cierreS = 0.0 }
+if ($cierreS -lt 3.0) { Fallo 'SIN_CIERRE' }
 if ($cierreS -gt 0) {
     $cierreDir = if ($env:MOLCY_BRAND_CACHE_DIR) {
         Join-Path $env:MOLCY_BRAND_CACHE_DIR "${Formato}_${Renderizador}"
@@ -135,7 +137,8 @@ if ((Test-Path $over) -and ((Get-ChildItem "$over\*.png" -ErrorAction SilentlyCo
 } else {
     Log 'SIN_CAPA_TITULO'
 }
-if ($cierreDir) { $argsCodificar += @('--cierre', $cierreDir) }
+if (-not $cierreDir -or -not $cierreManifiesto) { Fallo 'SIN_CIERRE' }
+$argsCodificar += @('--cierre', $cierreDir)
 & $Blender -b --python $codificar -- @argsCodificar *>&1 |
     Out-File -FilePath $log -Append -Encoding utf8
 $codigo = $LASTEXITCODE
@@ -146,8 +149,7 @@ if (-not (Test-Path $mp4)) { Fallo 'SIN_MP4' }
 if (-not ($nuevas | Select-String -Pattern 'ENCODE_VERIFICADO' -Quiet)) { Fallo 'ENCODE_SIN_VERIFICAR' }
 Estado 'ENCODE_OK'
 
-$argsSellar = @($mp4, $build)
-if ($cierreManifiesto) { $argsSellar += @('--cierre', $cierreManifiesto) }
+$argsSellar = @($mp4, $build, '--cierre', $cierreManifiesto)
 & $Python $sellar @argsSellar *>&1 |
     Out-File -FilePath $log -Append -Encoding utf8
 if ($LASTEXITCODE -ne 0) { Fallo ("SELLAR_EXIT_" + $LASTEXITCODE) }

@@ -52,6 +52,10 @@ def main() -> int:
     if not video.exists():
         print(f"SELLO_MP4_FALTA: {video}")
         return 1
+    if cierre is None or not cierre.exists():
+        # El cierre de MolDesign es obligatorio en todo video: un video sin su manifiesto no se sella ni se entrega.
+        print("SELLO_SIN_CIERRE: el cierre de MolDesign es obligatorio en todo video (--cierre <manifiesto.json>)")
+        return 1
 
     dig = sha256(video)
     datos = json.loads(acta.read_text(encoding="utf-8")) if acta.exists() else {}

@@ -106,12 +106,10 @@ INTERRUPTORES = (
     Interruptor("look_v4", "Look v4",
                 "Acabado satinado y cáscara translúcida del primer plano. "
                 "Apagado vuelve a la disolución anterior."),
-    Interruptor("cierre", "Cierre MolDesign",
-                "La firma 3D de la marca al final del vídeo. Se rinde una vez por "
-                "formato y se reutiliza."),
+    # No hay interruptor de «cierre»: el cierre de MolDesign (la firma 3D de la marca al final) es obligatorio en todo video.
     Interruptor("sello", "Crédito arriba",
                 "«Video generado por MolDesign» quemado arriba todo el vídeo. "
-                "Lo sustituye el cierre."),
+                "No sustituye al cierre, que va siempre."),
 )
 
 #: Botones de una pulsacion. `produccion` es vaciar los ajustes.
@@ -143,7 +141,6 @@ def por_defecto(formato) -> dict:
         "contactos": True,
         "look_v4": True,
         "sello": formato.sello_procedencia,
-        "cierre": formato.cierre_s > 0,
     }
 
 
@@ -157,6 +154,9 @@ def validar(ajustes: dict) -> dict:
     """`{"barras": {id: 0-100}, "interruptores": {id: bool}}`, sin extras."""
     barras = dict(ajustes.get("barras") or {})
     inter = dict(ajustes.get("interruptores") or {})
+    if any("cierre" in grupo for grupo in (barras, inter, ajustes)):
+        # Con su propio mensaje: «mandos desconocidos» sugeriria que basta con escribirlo bien.
+        raise ValueError("El cierre de MolDesign es obligatorio en todo video y no se puede quitar ni ajustar")
     raros = (set(barras) - set(_BARRAS)) | (set(inter) - _INTERRUPTORES) | \
         (set(ajustes) - {"barras", "interruptores"})
     if raros:
@@ -219,9 +219,6 @@ def aplicar(formato, ajustes: dict | None):
             cambios["etiquetas_3d"] = v
         elif k == "sello":
             cambios["sello_procedencia"] = v
-        elif k == "cierre":
-            # un formato sin cierre (el bucle) no lo gana por pedirlo
-            cambios["cierre_s"] = formato.cierre_s if v else 0.0
         else:                                   # contactos, look_v4
             extras[k] = v
     return replace(formato, **cambios), extras, resueltos

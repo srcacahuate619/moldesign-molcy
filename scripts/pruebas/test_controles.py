@@ -101,17 +101,13 @@ def test_formatos_llevan_cierre_y_no_sello():
     assert (V.cierre_s, V.sello_procedencia) == (3.6, False)
     b = fmt.cargar("biblioteca")
     assert (b.cierre_s, b.sello_procedencia) == (4.4, False)
-    # un bucle no termina: sin cierre
-    assert fmt.cargar("previsualizacion").cierre_s == 0.0
+    # el bucle es la escena, no el video: tambien la previsualizacion termina con el cierre (ver test_cierre_obligatorio.py)
+    assert fmt.cargar("previsualizacion").cierre_s == 3.6
 
 
-def test_interruptor_de_cierre():
-    assert C.por_defecto(V)["cierre"] is True
-    f, _, r = C.aplicar(V, {"interruptores": {"cierre": False}})
-    assert f.cierre_s == 0.0 and r == {"cierre": False}
-    # pedirlo en el bucle no lo crea
-    p = fmt.cargar("previsualizacion")
-    assert C.aplicar(p, {"interruptores": {"cierre": True}})[0].cierre_s == 0.0
+def test_no_hay_mando_de_cierre():
+    """El cierre de MolDesign es obligatorio: ningun mando lo lista, lo trae por defecto ni lo acepta."""
+    assert "cierre" not in {i.id for i in C.INTERRUPTORES}
+    assert "cierre" not in C.por_defecto(V)
     j = C.como_json(fmt.disponibles())
-    assert j["defecto"]["social_vertical"]["cierre"] is True
-    assert j["defecto"]["previsualizacion"]["cierre"] is False
+    assert all("cierre" not in por_defecto for por_defecto in j["defecto"].values())
