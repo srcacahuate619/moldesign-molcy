@@ -43,6 +43,7 @@ SCRIPTS = AQUI.parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from marca.idioma import idioma_del_cierre, lema_del_idioma   # noqa: E402
 from marca import medallones              # noqa: E402
 from nucleo import horneado as H          # noqa: E402
 from variables import formato as fmt      # noqa: E402
@@ -52,7 +53,7 @@ MARCA = SCRIPTS.parent / "moldesign" / "assets" / "marca"
 
 # ── identidad (de la web de MolDesign) ───────────────────────────────────
 NOMBRE = ("Mol", "Design")
-LEMA = "EVIDENCIA ESTRUCTURAL REPRODUCIBLE"   # <title> de molecule-design.amezcua-dev.com
+LEMA = lema_del_idioma()
 WEB = "molecule-design.amezcua-dev.com"
 
 
@@ -737,7 +738,7 @@ def huella(formato, segundos: float, muestras: int,
     for n in ("emblema.png", "emblema_alfa.png", "emblema_profundidad.png"):
         h.update((MARCA / n).read_bytes())
     h.update(json.dumps([formato.ancho, formato.alto, formato.fps, segundos, muestras, renderizador,
-                         bpy.app.version_string, getattr(FUENTE_NOMBRE, "name", "interna"),
+                         bpy.app.version_string, idioma_del_cierre(), lema_del_idioma(), getattr(FUENTE_NOMBRE, "name", "interna"),
                          getattr(FUENTE_MONO, "name", "interna")]).encode())
     return h.hexdigest()
 
@@ -763,7 +764,7 @@ def main() -> int:
         print(f"CIERRE_NO_APLICA: {a.formato} no lleva cierre")
         return 0
     segundos = formato.cierre_s
-    destino = Path(a.salida) if a.salida else MARCA / "cierre" / a.formato
+    destino = Path(a.salida) if a.salida else MARCA / "cierre" / f"{a.formato}_{idioma_del_cierre()}"
     firma = huella(formato, segundos, a.muestras, a.renderizador)
     manifiesto = destino / "manifiesto.json"
     if a.si_falta and not a.fotograma and manifiesto.exists():
@@ -801,6 +802,7 @@ def main() -> int:
         "muestras": a.muestras, "renderizador": a.renderizador,
         "hilos_cpu": sc.render.threads if a.renderizador == "cpu" else None,
         "huella": firma, "blender": bpy.app.version_string,
+        "idioma": idioma_del_cierre(), "lema": LEMA,
         "rendido_s": round(time.time() - t0, 1),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"CIERRE_LISTO: {n} fotogramas en {time.time() - t0:.0f}s -> {destino}")

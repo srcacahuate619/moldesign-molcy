@@ -116,12 +116,12 @@ def test_el_sellador_con_cierre_registra_la_firma_y_la_duracion_total(tmp_path):
     video, acta, manifiesto = tmp_path / "v.mp4", tmp_path / "build.json", tmp_path / "manifiesto.json"
     video.write_bytes(b"datos")
     acta.write_text(json.dumps({"fotogramas": 90}), encoding="utf-8")
-    manifiesto.write_text(json.dumps({"segundos": 3.6, "fotogramas": 108, "muestras": 48, "huella": "h", "blender": "5.2.2", "fps": 30}),
+    manifiesto.write_text(json.dumps({"segundos": 3.6, "fotogramas": 108, "muestras": 48, "huella": "h", "blender": "5.2.2", "fps": 30, "idioma": "es", "lema": "EVIDENCIA ESTRUCTURAL REPRODUCIBLE"}),
                           encoding="utf-8")
     sys.argv = ["sellar_mp4.py", str(video), str(acta), "--cierre", str(manifiesto)]
     assert sellar["main"]() == 0
     datos = json.loads(acta.read_text(encoding="utf-8"))
-    assert datos["cierre"] == {"segundos": 3.6, "fotogramas": 108, "muestras": 48, "huella": "h", "blender": "5.2.2"}
+    assert datos["cierre"] == {"segundos": 3.6, "fotogramas": 108, "muestras": 48, "huella": "h", "blender": "5.2.2", "idioma": "es", "lema": "EVIDENCIA ESTRUCTURAL REPRODUCIBLE"}
     assert datos["video"]["segundos"] == 6.6      # 90 fotogramas a 30 fps + 3,6 s de cierre
     assert (tmp_path / "v.mp4.sha256").exists()
 

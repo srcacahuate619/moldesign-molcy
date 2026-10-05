@@ -110,6 +110,7 @@ Estado 'MAESTRO_OK'
 # reutiliza mientras su huella no cambie. Es OBLIGATORIO en todo video: no hay
 # interruptor que lo quite, y un acta que no lo declare (cierre_s < 3 s) no se
 # codifica ni se entrega.
+$idioma = if ($env:MOLCY_IDIOMA -ceq 'en') { 'en' } else { 'es' }
 $cierreDir = ''
 $cierreManifiesto = ''
 $cierreS = 0.0
@@ -117,9 +118,9 @@ try { $cierreS = [double]$acta.formato.cierre_s } catch { $cierreS = 0.0 }
 if ($cierreS -lt 3.0) { Fallo 'SIN_CIERRE' }
 if ($cierreS -gt 0) {
     $cierreDir = if ($env:MOLCY_BRAND_CACHE_DIR) {
-        Join-Path $env:MOLCY_BRAND_CACHE_DIR "${Formato}_${Renderizador}"
+        Join-Path $env:MOLCY_BRAND_CACHE_DIR "${Formato}_${Renderizador}_${idioma}"
     } else {
-        Join-Path $Root "moldesign\assets\marca\cierre\${Formato}_${Renderizador}"
+        Join-Path $Root "moldesign\assets\marca\cierre\${Formato}_${Renderizador}_${idioma}"
     }
     $antes = Lineas
     & $Blender -b --factory-startup --python (Join-Path $Root 'scripts\marca\cierre.py') -- --formato $Formato --renderizador $Renderizador --salida $cierreDir --si-falta *>&1 |

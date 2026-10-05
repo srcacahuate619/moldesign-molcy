@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -68,8 +69,12 @@ def main() -> int:
         # Que firma lleva el video: la huella cubre el script del cierre, el
         # emblema, su relieve, las fuentes y la version de Blender.
         m = json.loads(cierre.read_text(encoding="utf-8"))
+        esperado = "en" if os.environ.get("MOLCY_IDIOMA") == "en" else "es"
+        if m.get("idioma") != esperado or not isinstance(m.get("lema"), str) or not m["lema"].strip():
+            print("SELLO_IDIOMA_CIERRE: el manifiesto no acredita el idioma y lema pedidos")
+            return 1
         datos["cierre"] = {k: m.get(k) for k in
-                           ("segundos", "fotogramas", "muestras", "huella", "blender")}
+                           ("segundos", "fotogramas", "muestras", "huella", "blender", "idioma", "lema")}
         datos["video"]["segundos"] = round(
             (datos.get("fotogramas") or 0) / (m.get("fps") or 30) + (m.get("segundos") or 0), 2)
     acta.write_text(json.dumps(datos, ensure_ascii=False, indent=2),
