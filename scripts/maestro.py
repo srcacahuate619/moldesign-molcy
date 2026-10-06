@@ -359,8 +359,8 @@ def main() -> int:
     if dibujados:
         print(f"VARILLAS: residuos {dibujados}")
 
-    # guion x formato
-    if guion.NOMBRE == "x":
+    # guion x e y formato: cuentan una película propia, no una escena de sitio activo
+    if guion.NOMBRE in ("x", "y"):
         from dataclasses import replace
         formato = replace(formato, papeles=None, bucle=False)
     beats = gui.resolver(guion.BEATS, paq, {"sujeto": ok}, formato, acta)

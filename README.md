@@ -58,3 +58,9 @@ la marca: el motor no ofrece ningún mando para quitarlo.
 ## Búsqueda interna de Vina
 
 El guion `x` utiliza `traza_interna.tipo = vina_monte_carlo_bfgs_interno`: estados retenidos muestreados de una réplica, métricas reales por paso y contadores de todas las réplicas. No acepta el muestreo Metropolis independiente anterior. Sin archivos verificables se abstiene. El número de réplicas procede de la corrida y la animación no interpola movimiento físico. El cierre de MolDesign sigue siendo obligatorio.
+
+## Ensamble conformacional
+
+El guion `y` (sujeto `ensamble_conformacional`) cuenta una evaluación en modo ensamble: las geometrías de entrada que aportaron poses, la mejor pose de cada corrida independiente de Vina, y las poses entregadas por la piscina con sus controles físicos e interacciones polares y apolares. Lee `ensamble.json` (`schema = moldesign.ensamble/1`), un contrato aparte de `docking.json` porque un ensamble tiene K corridas de Vina detrás y ningún archivo de poses único. Cada archivo que cita se verifica contra su SHA-256 y, sin contrato verificable, la escena se abstiene.
+
+Qué no hace: no anima rotaciones entre conformaciones (ETKDG entrega geometrías finales, no una trayectoria) ni sugiere que una conformación sea «la correcta». Las conformaciones se alinean rígidamente a la mejor pose sólo para compararlas; Vina recibió cada una sin alinear. Los controles físicos se aplicaron después del acoplamiento, y «no evaluado» se rotula como tal, nunca como aprobado. En un formato corto sólo se enseñan los primeros elementos que caben con tiempo para leerse, y el acta (`mostradas_en_el_video`) dice cuántos. El cierre de MolDesign sigue siendo obligatorio.
