@@ -31,6 +31,10 @@ from variables.titulos import NOMBRES_CURADOS, nombre_legible, titulo_pantalla  
 #: Cerca de la camara para quedar por delante de la geometria.
 CERCANIA = 0.45
 
+#: Profundidad (unidades de escena) a la que un rótulo con `igualar_tamano` conserva su escala
+#: de diseño: la distancia típica de los planos de seguimiento de `x`.
+PROFUNDIDAD_NOMINAL = 2.2
+
 #: Hasta donde puede llegar el ANCLA del texto, en fraccion del semicuadro.
 #: Sin este tope, apartar la etiqueta del centroide la empuja fuera de cuadro y
 #: el texto sale cortado por el borde.
@@ -46,6 +50,10 @@ class Rotulo:
     material: object = None
     ventana: tuple[int, int] = (1, 1)
     fundido: list = field(default_factory=list)
+    #: Fotograma con el que se coloca (la cámara de ese instante); None = el del beat del guion.
+    colocar_en: int | None = None
+    #: Puntos (mundo) del sujeto que este rótulo no debe tapar: se reserva su caja en pantalla.
+    reservar: list | None = None
 
 
 def _duplicar(prototipo, nombre: str, texto: str, escala_texto: float):
@@ -98,7 +106,36 @@ def crear_anclada(id_: str, texto: str, ancla: Vector, prototipo, proto_guia,
     return Rotulo(id=id_, texto=texto, objeto=lab, guia=guia, material=mat)
 
 
-def colocar_ancladas(cam, rotulos, separacion: float = 0.17) -> None:
+def tintar(rotulo: "Rotulo", color) -> None:
+    """Cambia el color del texto y de su guía (comparten material); el alfa no se toca.
+
+    Se usa para distinguir las interacciones polares de las apolares:
+    el material del prototipo es naranja y su alfa lo anima `hornear`.
+    """
+    nodos = rotulo.material.node_tree.nodes if rotulo.material else []
+    for nodo in nodos:
+        for nombre in ("Base Color", "Emission Color"):
+            if nombre in nodo.inputs:
+                nodo.inputs[nombre].default_value = (*color, 1.0)
+
+
+def _factor_de_tamano(profundidades: dict, igualar: bool) -> dict:
+    """Escala de cada rótulo para que TODOS se vean del mismo tamaño en pantalla.
+
+    El rótulo se coloca a una fracción fija de la distancia cámara→ancla, así que su
+    tamaño en pantalla es 1/profundidad: con la cámara cerca (la escena `x` sigue a la
+    pose a 1–3 unidades) un ancla próxima daba un texto el doble de grande que una
+    lejana, y el mismo rótulo cambiaba de tamaño según el plano. Con `igualar` cada uno
+    se escala por su profundidad respecto a `PROFUNDIDAD_NOMINAL`: tamaño en pantalla
+    constante en todos los planos.
+    """
+    if not igualar or not profundidades:
+        return {k: 1.0 for k in profundidades}
+    return {k: max(0.35, min(2.0, v / PROFUNDIDAD_NOMINAL)) for k, v in profundidades.items()}
+
+
+def colocar_ancladas(cam, rotulos, separacion: float = 0.17,
+                     igualar_tamano: bool = False, reservados=()) -> None:
     """Coloca y orienta un grupo respecto a una camara QUIETA.
 
     `separacion` sube cuando hay pocas etiquetas: el reparto las aparta del
@@ -131,6 +168,8 @@ def colocar_ancladas(cam, rotulos, separacion: float = 0.17) -> None:
                        d.dot(uv) / (math.tan(hx) * z / asp))), z
 
     cn, _ = pantalla(C)
+    tamanos = _factor_de_tamano({r.id: pantalla(anclas[r.id])[1] for r in grupo},
+                                igualar_tamano)
     for r in grupo:
         ac = anclas[r.id]
         n, z = pantalla(ac)
@@ -152,7 +191,7 @@ def colocar_ancladas(cam, rotulos, separacion: float = 0.17) -> None:
         # ancla quede justo en el limite.
         lab.data.align_x = "RIGHT" if destino.x > 0.15 else "LEFT"
         lab.location = M.translation + (objetivo - M.translation) * k
-        lab.scale = (k, k, k)
+        lab.scale = (k * tamanos[r.id],) * 3
         lab.rotation_mode = "QUATERNION"
         lab.rotation_quaternion = q
         if r.guia is None:
@@ -304,7 +343,8 @@ def _guia_mundo(anc, centro):
     return anc + uu * ini, anc + uu * fin
 
 
-def colocar_dinamicas(cam, rotulos, separacion: float = 0.17) -> None:
+def colocar_dinamicas(cam, rotulos, separacion: float = 0.17,
+                      igualar_tamano: bool = False, reservados=()) -> None:
     """Cada etiqueta busca su sitio en espiral alrededor de su ancla.
 
     Solo para cuadro angosto (vertical): con texto grande y anclas juntas, el
@@ -359,7 +399,11 @@ def colocar_dinamicas(cam, rotulos, separacion: float = 0.17) -> None:
         return min(1.0, (donde - centro).length / 8.0)
 
     cn, _ = pantalla(C)
-    puestas, centros, guias = [], [], []
+    # `reservados`: cajas (x0, y0, x1, y1, en NDC) donde ya hay texto de pantalla; se
+    # tratan como rótulos ya puestos para que ninguno se coloque encima.
+    puestas, centros, guias = [tuple(b) for b in reservados], [], []
+    tamanos = _factor_de_tamano({r.id: pantalla(anclas[r.id])[1] for r in grupo},
+                                igualar_tamano)
     for r in grupo:
         ac = anclas[r.id]
         n, z_a = pantalla(ac)
@@ -367,6 +411,7 @@ def colocar_dinamicas(cam, rotulos, separacion: float = 0.17) -> None:
             continue
         lab = r.objeto
         hx0, hy0 = _caja_local(lab)
+        hx0, hy0 = hx0 * tamanos[r.id], hy0 * tamanos[r.id]
         anc = M.translation + (ac - M.translation) * k
         d = n - cn
         if d.length < 1e-3:
@@ -483,7 +528,7 @@ def colocar_dinamicas(cam, rotulos, separacion: float = 0.17) -> None:
         centros.append(c)
         lab.data.align_x = "RIGHT" if c.x > 0.15 else "LEFT"
         lab.location = centro
-        lab.scale = (k, k, k)
+        lab.scale = (k * tamanos[r.id],) * 3
         lab.rotation_mode = "QUATERNION"
         lab.rotation_quaternion = q
         if r.guia is None:

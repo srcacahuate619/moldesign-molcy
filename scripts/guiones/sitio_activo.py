@@ -228,13 +228,23 @@ def anotaciones(rangos, formato, fps, n_sujeto: int = 1):
         # El nombre del sujeto entra primero; las distancias medidas detras, una
         # cada medio segundo, para que se lean en orden y no de golpe.
         base = a + max(3, int(1.4 * fps))
-        for i in range(max(1, n_sujeto)):
-            e0 = base + i * max(4, int(0.5 * fps))
-            if e0 + fade >= b - 3:
+        paso = max(4, int(0.5 * fps))
+        n = max(1, n_sujeto)
+        entra = sale = fade
+        # Con muchos rótulos (la pose y cada interacción) entran más rápido y antes: el
+        # último tiene que terminar de aparecer ANTES de que empiece a irse el primero,
+        # o nunca se ven todos a la vez. Con pocos, como siempre.
+        if n > 2:
+            entra = sale = max(4, int(0.2 * fps))
+            mantener = max(6, int(0.25 * fps))
+            paso = max(2, min(paso, (b - 3 - base - entra - sale - mantener) // (n - 1)))
+        for i in range(n):
+            e0 = base + i * paso
+            if e0 + entra >= b - 3:
                 break
             plan["sujeto"].append({
                 "ventana": (e0, b - 3),
-                "fundido": [(e0, e0 + fade, 0, 1), (b - fade - 3, b - 3, 1, 0)]})
+                "fundido": [(e0, e0 + entra, 0, 1), (b - sale - 3, b - 3, 1, 0)]})
     return plan
 
 

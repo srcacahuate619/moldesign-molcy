@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -26,7 +27,7 @@ if str(AQUI) not in sys.path:
 import bpy                                                      # noqa: E402
 from mathutils import Vector                                    # noqa: E402
 
-from nucleo import arte, camara, encuadre, horneado as H, oclusion, receptor  # noqa: E402
+from nucleo import arte, camara, encuadre, horneado as H, interacciones, oclusion, receptor  # noqa: E402
 from nucleo.ciencia import Paquete                              # noqa: E402
 from nucleo.rutas import ESCENAS, PLANTILLA_ARTE, carpeta_de_caso  # noqa: E402
 from salida import control, procedencia, render                 # noqa: E402
@@ -95,6 +96,21 @@ def huella_de_construccion(registro: dict) -> str:
     if PLANTILLA_ARTE.exists():
         h.update(PLANTILLA_ARTE.read_bytes())
     return h.hexdigest()
+
+
+def _caja_en_pantalla(cam, puntos, margen: float = 0.07):
+    """Caja (x0, y0, x1, y1, en NDC -1..1) que ocupan `puntos` vistos desde `cam`, o None."""
+    from bpy_extras.object_utils import world_to_camera_view
+    sc = bpy.context.scene
+    xs, ys = [], []
+    for p in puntos:
+        v = world_to_camera_view(sc, cam, p)
+        if v.z > 0:
+            xs.append(v.x * 2 - 1)
+            ys.append(v.y * 2 - 1)
+    if not xs:
+        return None
+    return (min(xs) - margen, min(ys) - margen, max(xs) + margen, max(ys) + margen)
 
 
 def vista_previa(pos: float, salida: str, formato, rangos, n_frames,
@@ -450,8 +466,14 @@ def main() -> int:
     proto_guia = bpy.data.objects.get("Leader_Lab_Erlo")
     creados = []
     capa_titulo = None
-    plan = guion.anotaciones(rangos, formato, formato.fps,
-                             n_sujeto=len(montado.anclas))
+    # Un guion que necesita saber QUÉ rótulos trae el sujeto (cada interacción en la
+    # ventana de su pose, en `x`) acepta `montado`; los demás no lo piden.
+    if "montado" in inspect.signature(guion.anotaciones).parameters:
+        plan = guion.anotaciones(rangos, formato, formato.fps,
+                                 n_sujeto=len(montado.anclas), montado=montado)
+    else:
+        plan = guion.anotaciones(rangos, formato, formato.fps,
+                                 n_sujeto=len(montado.anclas))
     # Las ancladas viven en el mundo y su tamano en pantalla lo pone la
     # perspectiva: el aumento de movil es solo para el texto de pantalla.
     esc_ancladas = (formato.escala_etiquetas_3d
@@ -470,11 +492,21 @@ def main() -> int:
             r.ventana, r.fundido = cfg["ventana"], cfg["fundido"]
             grupo_h.append(r)
         grupo_s = []
+        grupo_f = []        # los que traen su propio fotograma de colocación
+        colores = (montado.extra or {}).get("colores_anclas", {})
+        encima = bool((montado.extra or {}).get("rotulos_encima"))
         for cfg, (sid, texto, pos) in zip(plan["sujeto"], montado.anclas):
-            r = rotulos.crear_anclada(sid, texto, pos, proto, proto_guia,
-                                       esc_ancladas)
+            if cfg is None:        # esta ancla no se rotula en este guion
+                continue
+            r = rotulos.crear_anclada(
+                sid, texto, pos, proto, proto_guia,
+                esc_ancladas * (interacciones.ESCALA_ROTULO if sid in colores else 1.0))
             r.ventana, r.fundido = cfg["ventana"], cfg["fundido"]
-            grupo_s.append(r)
+            r.colocar_en = cfg.get("colocar_en")
+            r.reservar = cfg.get("reservar")
+            if sid in colores:
+                rotulos.tintar(r, colores[sid])
+            (grupo_f if r.colocar_en is not None else grupo_s).append(r)
         # En vertical las ancladas se colocan con busqueda dinamica (texto
         # grande en cuadro angosto); en horizontal, la de siempre.
         colocar = (rotulos.colocar_dinamicas if formato.vertical
@@ -487,8 +519,31 @@ def main() -> int:
             a0, b0 = rangos[beat]
             sc.frame_set((a0 + b0) // 2)
             bpy.context.view_layer.update()
-            colocar(rig.camara, grupo, sep)
-        creados = grupo_h + grupo_s
+            reservados = []
+            if encima and grupo is grupo_s and montado.dianas:
+                # Los rótulos no se colocan encima del propio ligando.
+                caja = _caja_en_pantalla(rig.camara, montado.dianas)
+                reservados = [caja] if caja else []
+            colocar(rig.camara, grupo, sep,
+                    igualar_tamano=encima and grupo is grupo_s,
+                    reservados=reservados)
+        # Cada rótulo con la cámara del instante en que se ve (en `x` la cámara
+        # sigue a cada pose, así que no hay un beat quieto donde colocarlos todos).
+        por_fotograma: dict[int, list] = {}
+        for r in grupo_f:
+            por_fotograma.setdefault(r.colocar_en, []).append(r)
+        for fotograma in sorted(por_fotograma):
+            sc.frame_set(fotograma)
+            bpy.context.view_layer.update()
+            reservados = list((montado.extra or {}).get("zona_texto_pantalla", ()))
+            nube = [p for r in por_fotograma[fotograma] for p in (r.reservar or ())]
+            if nube:
+                caja = _caja_en_pantalla(rig.camara, nube)
+                if caja:
+                    reservados.append(caja)
+            colocar(rig.camara, por_fotograma[fotograma], 0.30, igualar_tamano=True,
+                    reservados=reservados)
+        creados = grupo_h + grupo_s + grupo_f
         cfg_tit = (guion.titulo(rangos, formato, formato.fps)
                    if hasattr(guion, "titulo") else None)
         if cfg_tit:
@@ -512,6 +567,19 @@ def main() -> int:
             # los bordes del texto bueno y lo haga leer borroso.
             t.objeto.visible_camera = False
             print(f"TITULO: {t.texto}")
+        if encima and (grupo_s or grupo_f):
+            # Las interacciones se rotulan en la capa del título: se rinde aparte y
+            # se compone encima, así ninguna cinta del receptor ni el propio ligando
+            # las tapan (el texto detrás de la molécula no se lee). Se esconden del
+            # pase principal por la misma razón que el título (ver arriba).
+            for r in grupo_s + grupo_f:
+                for objeto in (r.objeto, r.guia):
+                    objeto.visible_camera = False
+                    if capa_titulo is None:
+                        capa_titulo = {"objetos": [], "ventana": tuple(r.ventana)}
+                    capa_titulo["objetos"].append(objeto.name)
+                capa_titulo["ventana"] = (min(capa_titulo["ventana"][0], r.ventana[0]),
+                                          max(capa_titulo["ventana"][1], r.ventana[1]))
         if hasattr(guion, "rotulos_datos"):
             for cfg in guion.rotulos_datos(rangos, formato, formato.fps, montado):
                 dato = rotulos.crear_pantalla(

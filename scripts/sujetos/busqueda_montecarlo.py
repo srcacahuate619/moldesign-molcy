@@ -204,7 +204,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     import bpy                                                               # noqa: E402
     import bl_ext.blender_org.molecularnodes as mn                           # noqa: E402
     from mathutils import Matrix, Vector                                     # noqa: E402
-    from nucleo import arte, receptor, contactos                             # noqa: E402
+    from nucleo import arte, receptor, contactos, interacciones              # noqa: E402
     d = paq.dock
     pref = f"{paq.pdb_id}_Dock_"
 
@@ -297,13 +297,16 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     m.extra["contactos_por_pose"] = {}
     nombres = contactos.mapa_de_residuos(paq.ruta("prepared"))
     cadenas = paq.cadenas_conservadas or [paq.cadena_principal]
-    hotspots = {(h.cadena, h.numero) for h in (ctx.receptor.hotspots or [])}
+    presentados = [h.numero for h in (ctx.receptor.hotspots or [])]
+    multicadena = len(cadenas) > 1
     mat_polar = arte.copiar_material(ctx.arte["HBond_EGFR_Gold"],
                                      pref + "ContactoPolar")
     arte.subir_emision(mat_polar, 6.0)
     mat_apolar = contactos.material_hidrofobico(pref + "ContactoHidrofobico")
     m.extra["materiales_contacto"] = [mat_polar, mat_apolar]
     datos_contactos = []
+    m.extra["rotulos_por_pose"] = {}
+    m.extra["colores_anclas"] = {}
     for p in poses:
         ruta = paq.ruta_dock(p["archivo"])
         mol = mn.Molecule.load(str(ruta), name=f"{pref}Pose{p['rank']}")
@@ -323,31 +326,42 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                                   "rmsd_vina_superior_a": p.get("rmsd_vina_superior_a")})
         if mat:
             m.materiales_secundarios.append(mat)
-        polares = contactos.medir(
-            ctx.receptor.molecula, mol, cerca_de=ctx.pivote,
-            nombres=nombres, cadenas=cadenas, solo_residuos=hotspots)
-        apolares = contactos.medir_hidrofobicos(
-            ctx.receptor.molecula, mol, cerca_de=ctx.pivote,
-            nombres=nombres, cadenas=cadenas, solo_residuos=hotspots)
-        elegidos = contactos.elegir_por_tipo(polares, apolares, 3,
-                                            preferidos=[h[1] for h in hotspots])
-        lineas = []
+        c = arte.centro_evaluado(obj)
+        # Contra TODOS los residuos del bolsillo de ESTA pose (no sólo contra los
+        # hotspots del catálogo: 1J38 no trae ninguno y las nueve poses salían con
+        # «polares 0 | apolares 0»); los hotspots que existan van primero.
+        elegidos, n_pol, n_apo = interacciones.medir(
+            ctx.receptor.molecula, mol, c, nombres=nombres, cadenas=cadenas,
+            preferidos=presentados)
+        lineas, rotulos = [], []
         for j, contacto in enumerate(elegidos):
             material = mat_apolar if contacto.tipo == "hidrofobico" else mat_polar
             linea = contactos.dibujar(
                 f"{pref}Pose{p['rank']}_{contacto.tipo}_{j}", contacto, material)
             if linea is not None:
                 lineas.append(linea.name)
-            datos_contactos.append({"pose": p["rank"], "tipo": contacto.tipo,
-                                    "resname": contacto.resname,
-                                    "resid": contacto.resid,
-                                    "cadena": contacto.cadena,
-                                    "distancia_a": round(contacto.distancia_a, 2)})
+            # Rótulo de la línea: residuo, clase y distancia (polar o apolar).
+            # `dist*`: el motor las retira con las líneas si se apagan los contactos.
+            ident = f"dist_p{p['rank']}_{j}"
+            m.anclas.append((ident, interacciones.texto(contacto, multicadena),
+                             contacto.medio))
+            m.extra["colores_anclas"][ident] = interacciones.color(contacto)
+            rotulos.append(ident)
+            if p["rank"] == 1:
+                # La mejor pose también se rotula en el primer plano del sitio, que
+                # es cuando el bolsillo se ve más de cerca.
+                ident_sitio = f"dist_s_{j}"
+                m.anclas.append((ident_sitio, interacciones.texto(contacto, multicadena),
+                                 contacto.medio))
+                m.extra["colores_anclas"][ident_sitio] = interacciones.color(contacto)
+                m.extra.setdefault("rotulos_sitio", []).append(ident_sitio)
+            datos_contactos.append({"pose": p["rank"], **interacciones.registro(contacto),
+                                    "tipo_bruto": contacto.tipo})
+        m.extra["rotulos_por_pose"][p["rank"]] = rotulos
         m.extra["contactos_por_pose"][p["rank"]] = lineas
         m.extra["poses"][-1]["contactos"] = {
             "polares": sum(c.tipo == "polar" for c in elegidos),
             "hidrofobicos": sum(c.tipo == "hidrofobico" for c in elegidos)}
-        c = arte.centro_evaluado(obj)
         af = p.get("afinidad_kcal_mol")
         texto = f"#{p['rank']}" + (f"  {af:.1f} kcal/mol"
                                    if isinstance(af, (int, float)) else "")
@@ -365,10 +379,15 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     m.medido["n_poses_dibujadas"] = len(poses)
     m.medido["contactos"] = datos_contactos
     m.medido["residuos_de_contacto"] = sorted({c["resid"] for c in datos_contactos})
-    m.notas.append("Contactos por cada pose final solo con hotspots: oro = "
-                   "proximidad polar N/O; cian = carbonos apolares de cadena "
-                   "lateral a 2.8-4.5 A. Son contactos geometricos, no "
-                   "puentes H confirmados ni energias de union.")
+    # Los rótulos de las interacciones van por encima de la geometría (ver `maestro`).
+    m.extra["rotulos_encima"] = True
+    #: El texto de pantalla de esta escena ocupa la esquina superior izquierda (NDC): los
+    #: rótulos 3D no se colocan encima.
+    m.extra["zona_texto_pantalla"] = [(-1.0, 0.45, 0.40, 1.0)]
+    m.notas.append("Interacciones de cada pose final contra los residuos de su "
+                   "bolsillo (hotspots del catalogo primero): polares y apolares, cada "
+                   "una con su linea y su rotulo de residuo, clase y distancia. "
+                   + interacciones.NOTA)
     m.medido["n_pasos"] = traza["pasos_totales"]
     m.medido["n_aceptados"] = traza["aceptados_totales"]
     m.medido["n_replicas"] = traza["replicas"]

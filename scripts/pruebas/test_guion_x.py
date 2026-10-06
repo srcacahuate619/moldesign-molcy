@@ -264,3 +264,93 @@ def test_suavizar_conserva_lo_constante_y_redondea_un_escalon():
     escalon = guion_x._suavizar([0.0] * 20 + [1.0] * 20, 3.0)
     assert all(a <= b + 1e-12 for a, b in zip(escalon, escalon[1:]))
     assert 0.0 < escalon[20] < 1.0
+
+
+# ── interacciones: rótulos 3D por pose ──────────────────────────────────────
+def _contacto(tipo, resname="TYR", resid=507, distancia=3.1, cadena="A"):
+    from types import SimpleNamespace
+    return SimpleNamespace(tipo=tipo, resname=resname, resid=resid, cadena=cadena,
+                           distancia_a=distancia, etiqueta=f"{distancia:.2f} Å")
+
+
+def test_el_rotulo_de_una_interaccion_dice_residuo_clase_y_distancia_sin_nombres_de_color():
+    from nucleo import interacciones
+    polar = interacciones.texto(_contacto("polar", "ASP", 120, 2.87))
+    apolar = interacciones.texto(_contacto("hidrofobico", "LEU", 45, 3.912))
+    assert polar == "ASP120\nPOLAR  2.87 Å"
+    assert apolar == "LEU45\nAPOLAR  3.91 Å"
+    texto_entero = (polar + apolar + interacciones.NOTA).lower()
+    # «oro» se lee como el elemento: ningún texto nombra los colores
+    assert " oro" not in texto_entero and "cian" not in texto_entero and "dorad" not in texto_entero
+    assert interacciones.color(_contacto("polar")) != interacciones.color(_contacto("hidrofobico"))
+
+
+def test_el_rotulo_lleva_la_cadena_solo_si_el_sitio_es_multicadena():
+    from nucleo import interacciones
+    c = _contacto("polar", "SER", 12, 3.0, cadena="B")
+    assert interacciones.texto(c) == "SER12\nPOLAR  3.00 Å"
+    assert interacciones.texto(c, con_cadena=True) == "SER12:B\nPOLAR  3.00 Å"
+    assert interacciones.texto(_contacto("polar", "?", 7)).startswith("RES7")
+
+
+def test_el_registro_del_acta_usa_polar_y_apolar():
+    from nucleo import interacciones
+    assert interacciones.registro(_contacto("hidrofobico"))["tipo"] == "apolar"
+    assert interacciones.registro(_contacto("polar"))["tipo"] == "polar"
+
+
+def _montado_con_interacciones():
+    from types import SimpleNamespace
+    poses = [{"nombre": f"P{i}", "rank": i} for i in range(1, 4)]
+    anclas = [("caja", "caja", None), ("pose1", "#1", None)]
+    por_pose = {}
+    for i in (1, 2, 3):
+        ids = [f"dist_p{i}_{j}" for j in range(2)]
+        por_pose[i] = ids
+        anclas += [(ident, "x", None) for ident in ids]
+    anclas += [("dist_s_0", "x", None), ("dist_s_1", "x", None)]
+    return SimpleNamespace(anclas=anclas, extra={
+        "poses": poses, "rotulos_por_pose": por_pose,
+        "rotulos_sitio": ["dist_s_0", "dist_s_1"],
+        "puntos_poses": [["p1"], ["p2"], ["p3"]]})
+
+
+def test_cada_interaccion_se_rotula_en_la_ventana_de_su_pose_y_las_de_la_mejor_tambien_en_el_sitio():
+    formato, rangos = _rangos_x()
+    montado = _montado_con_interacciones()
+    plan = guion_x.anotaciones(rangos, formato, formato.fps, n_sujeto=len(montado.anclas),
+                               montado=montado)
+    assert len(plan["sujeto"]) == len(montado.anclas)          # alineado con las anclas
+    por_id = {a[0]: cfg for a, cfg in zip(montado.anclas, plan["sujeto"])}
+    assert por_id["caja"] is None and por_id["pose1"] is None   # no son interacciones
+    ventanas = guion_x.ventanas_poses(rangos, 3)
+    for rank in (1, 2, 3):
+        cfg = por_id[f"dist_p{rank}_0"]
+        assert cfg["ventana"] == ventanas[rank - 1]
+        assert ventanas[rank - 1][0] <= cfg["colocar_en"] <= ventanas[rank - 1][1]
+        assert cfg["reservar"] == [f"p{rank}"]                   # la nube de ESA pose
+    sitio = por_id["dist_s_0"]
+    assert rangos["sitio"][0] < sitio["ventana"][0] and sitio["ventana"][1] == rangos["sitio"][1]
+    assert sitio["reservar"] == ["p1"]
+    for cfg in (c for c in plan["sujeto"] if c):
+        (a, b), fundido = cfg["ventana"], cfg["fundido"]
+        assert fundido[0][0] == a and fundido[1][1] == b and fundido[0][1] <= fundido[1][0]
+
+
+def test_sin_montado_o_sin_etiquetas_3d_no_hay_rotulos_de_interaccion():
+    from dataclasses import replace
+    formato, rangos = _rangos_x()
+    assert guion_x.anotaciones(rangos, formato, formato.fps)["sujeto"] == []
+    sin = replace(formato, etiquetas_3d=False)
+    assert guion_x.anotaciones(rangos, sin, sin.fps, montado=_montado_con_interacciones())["sujeto"] == []
+
+
+def test_una_pose_demasiado_corta_no_se_rotula():
+    from dataclasses import replace
+    formato = replace(fmt.cargar("biblioteca"), segundos=3.0, bucle=False)
+    rangos, _ = gui.repartir(guion_x.BEATS, formato)
+    rangos = guion_x.ajustar_rangos(rangos, formato)
+    plan = guion_x.anotaciones(rangos, formato, formato.fps, montado=_montado_con_interacciones())
+    for cfg in (c for c in plan["sujeto"] if c):
+        a, b = cfg["ventana"]
+        assert b - a + 1 >= guion_x.MINIMO_ROTULO

@@ -398,9 +398,53 @@ def estados(medidas, rangos, n_frames, formato, experimental=False):
     return out
 
 
-def anotaciones(rangos, formato, fps, n_sujeto: int = 1):
-    """Las poses se identifican en pantalla, sin etiquetas sobre el sitio."""
-    return {"hotspots": [], "sujeto": []}
+#: Una pose se ve menos de esto y su rótulo no llega a leerse: se omite (la vista de CPU, de
+#: tres segundos, reparte las nueve poses en unos pocos fotogramas cada una).
+MINIMO_ROTULO = 6
+
+
+def anotaciones(rangos, formato, fps, n_sujeto: int = 1, montado=None):
+    """Cuándo entra y sale cada rótulo 3D de interacción, alineado con `montado.anclas`.
+
+    Cada interacción (residuo, clase y distancia) se ve mientras su pose está en
+    pantalla, con la cámara de ese instante (`colocar_en`); las de la mejor pose
+    también durante el primer plano del sitio, que es cuando el bolsillo se ve más
+    de cerca. Las anclas que no son interacciones (la caja, el número de pose…) no
+    se rotulan en esta escena: su entrada es None.
+    """
+    plan = {"hotspots": [], "sujeto": []}
+    if montado is None or not formato.etiquetas_3d:
+        return plan
+    extra = montado.extra or {}
+    por_pose = extra.get("rotulos_por_pose") or {}
+    del_sitio = set(extra.get("rotulos_sitio") or [])
+    poses = extra.get("poses") or []
+    ventana_de = dict(zip((p["rank"] for p in poses),
+                          ventanas_poses(rangos, len(poses))))
+    sitio = rangos.get("sitio")
+
+    nubes = {p["rank"]: nube for p, nube in zip(poses, extra.get("puntos_poses") or [])}
+
+    def entrada(a, b, rank):
+        if b - a + 1 < MINIMO_ROTULO:
+            return None
+        fade = max(2, min(int(0.2 * fps), (b - a + 1) // 3))
+        return {"ventana": (a, b), "colocar_en": (a + b) // 2,
+                "reservar": nubes.get(rank),
+                "fundido": [(a, a + fade, 0, 1), (b - fade, b, 1, 0)]}
+
+    for ident, _texto, _pos in montado.anclas:
+        cfg = None
+        if ident in del_sitio and sitio:
+            # El primer plano: del segundo fotograma al final del beat, con la
+            # cámara quieta (después empieza a abrirse hacia la caja).
+            cfg = entrada(sitio[0] + 2, sitio[1], 1)
+        else:
+            rank = next((r for r, ids in por_pose.items() if ident in ids), None)
+            if rank in ventana_de:
+                cfg = entrada(*ventana_de[rank], rank)
+        plan["sujeto"].append(cfg)
+    return plan
 
 
 def aparicion_del_sujeto(rangos, fps):
@@ -498,8 +542,8 @@ def rotulos_datos(rangos, formato, fps, montado):
         af = pose.get("afinidad")
         valor = f"{af:.2f} kcal/mol" if isinstance(af, (int, float)) else ""
         cuenta = pose.get("contactos", {})
-        lectura = (f"\nORO POLAR {cuenta.get('polares', 0)}  |  "
-                   f"CIAN HIDROFOBICO {cuenta.get('hidrofobicos', 0)}"
+        lectura = (f"\nPOLARES {cuenta.get('polares', 0)}  |  "
+                   f"APOLARES {cuenta.get('hidrofobicos', 0)}"
                    if montado.extra.get("contactos_visibles", True) else "")
         rmsd = pose.get("rmsd_vina_inferior_a")
         if i > 1 and isinstance(rmsd, (int, float)):
