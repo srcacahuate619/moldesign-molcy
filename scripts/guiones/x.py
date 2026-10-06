@@ -133,7 +133,7 @@ def _visibilidad(centro, radio, desde, objeto_receptor):
     return libres / len(destinos)
 
 
-def ajustar_medidas(medidas, paq, rec, montado, formato):
+def ajustar_medidas(medidas, paq, rec, montado, formato, visibilidad=None):
     """Planifica la cámara con TODO lo que la escena va a enseñar.
 
     El plano anterior encuadraba sólo la mejor pose del ligando —con `distancia`,
@@ -149,7 +149,12 @@ def ajustar_medidas(medidas, paq, rec, montado, formato):
 
     El azimut y la elevación se eligen midiendo qué ángulo deja el sitio sin
     receptor por delante.
+
+    `visibilidad` sustituye esa medida (misma firma que `_visibilidad`): la escena
+    `y` la cambia por la de los átomos del ligando, porque allí el protagonista es
+    el propio ligando y no el volumen del sitio. Sin ella nada cambia.
     """
+    visible = visibilidad or _visibilidad
     from nucleo import encuadre, receptor
     K = medidas["pivote"]
     extra = montado.extra or {}
@@ -178,7 +183,7 @@ def ajustar_medidas(medidas, paq, rec, montado, formato):
         for az in range(0, 360, 15):
             dist = encuadre.distancia_visible(sitio, ancla, L, aspecto, el, [float(az)],
                                               MARGEN_SITIO)
-            vis = _visibilidad(ancla, radio_ancla,
+            vis = visible(ancla, radio_ancla,
                                encuadre.posicion(ancla, az, el, dist), objeto_receptor)
             # La visibilidad manda; a igualdad (±0.05) gana la elevación más
             # cinematográfica y, después, el plano más cerrado.
@@ -224,7 +229,7 @@ def ajustar_medidas(medidas, paq, rec, montado, formato):
     # `medir` calcula el arco de la RETIRADA de `sitio_activo`, que esta escena no
     # recorre; su mínimo (0.000 con puntos dentro del propio ligando) avisaba de un
     # plano que no existe. Lo que sí se recorre de cerca es el sitio y cada pose.
-    cerca = [_visibilidad(ancla, radio_ancla,
+    cerca = [visible(ancla, radio_ancla,
                           encuadre.posicion(p["objetivo"], az, el, p["dist"]),
                           objeto_receptor)
              for p in [p_sitio] + p_poses[:1]]

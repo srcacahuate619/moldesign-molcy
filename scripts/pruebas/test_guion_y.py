@@ -18,6 +18,7 @@ from variables import formato as fmt
 from variables import guion as gui
 from variables.guion import Acta
 from variables.sujeto import Montado
+from guiones import x as guion_x
 from guiones import y as guion_y
 
 PDB = "HEBRA 1TTT\n"
@@ -353,3 +354,26 @@ def test_la_escena_no_tiene_titulo_de_pantalla_ni_contactos_aparte():
     assert guion_y.titulo({}, None, 30) is None
     assert guion_y.aparicion_del_sujeto({}, 30) is None
     assert guion_y.aparicion_de_contactos({}, 30) is None
+
+
+# ── la cámara: se mide la visibilidad del LIGANDO, no la del volumen del sitio ──
+def test_x_acepta_una_visibilidad_propia_y_sin_ella_no_cambia():
+    """`y` sustituye la medida de `x`; el defecto de `x` tiene que seguir siendo suyo."""
+    import inspect
+    parametros = inspect.signature(guion_x.ajustar_medidas).parameters
+    assert "visibilidad" in parametros
+    assert parametros["visibilidad"].default is None
+
+
+def test_la_visibilidad_del_ligando_es_una_funcion_con_la_firma_de_la_de_x():
+    import inspect
+    visible = guion_y._visibilidad_del_ligando([object()] * 400)
+    assert callable(visible)
+    # Misma firma que `x._visibilidad`: (centro, radio, desde, objeto_receptor).
+    assert list(inspect.signature(visible).parameters) == ["_centro", "_radio", "desde", "objeto_receptor"]
+    assert list(inspect.signature(guion_x._visibilidad).parameters) == [
+        "centro", "radio", "desde", "objeto_receptor"]
+
+
+def test_no_se_lanzan_mas_rayos_de_los_que_el_tope_permite():
+    assert guion_y.MAX_PUNTOS_VISIBILIDAD <= 120

@@ -49,6 +49,8 @@ SUAVIZADO_S = 0.15
 MINIMO_CONFORMERO, MINIMO_CORRIDA, MINIMO_POSE = 12, 12, 18
 #: Una pose se ve menos de esto y su rótulo 3D no llega a leerse: se omite.
 MINIMO_ROTULO = 6
+#: Puntos de la mejor pose que se lanzan como rayos al elegir el ángulo de cámara.
+MAX_PUNTOS_VISIBILIDAD = 90
 #: Líneas de diedros y de controles fallidos que caben en pantalla.
 MAX_DIEDROS, MAX_FALLOS = 6, 2
 
@@ -121,6 +123,49 @@ def _ventanas_poses(rangos, n):
 
 
 # ── cámara ───────────────────────────────────────────────────────────────────
+def _visibilidad_del_ligando(puntos):
+    """Medida de visibilidad que sustituye a la de `x`: ¿se VE el ligando?
+
+    `x` lanza sus rayos al volumen del sitio y los detiene al entrar en él, así que las
+    varillas de los residuos de contacto —que están dentro— nunca cuentan como obstáculo.
+    Con el ligando como protagonista eso deja pasar ángulos donde un anillo aromático
+    cae delante del núcleo de la pose (medido en 3RUT: 880 de 1440 puntos tapados con
+    «cobertura 1.0»). Aquí cada rayo va hasta un punto de la mejor pose y cuenta como
+    obstáculo todo el receptor, cinta y varillas; las demás poses y el propio ligando no.
+    """
+    paso = max(1, len(puntos) // MAX_PUNTOS_VISIBILIDAD)
+    muestra = list(puntos[::paso])
+
+    def visible(_centro, _radio, desde, objeto_receptor):
+        import bpy
+        dg = bpy.context.evaluated_depsgraph_get()
+        escena = bpy.context.scene
+        libres = 0
+        for destino in muestra:
+            v = destino - desde
+            largo = v.length
+            if largo < 1e-6:
+                continue
+            direccion, origen, restante, tapado = v / largo, desde.copy(), largo - 0.02, False
+            for _ in range(8):
+                golpe, ubicacion, _n, _i, objeto, _m = escena.ray_cast(
+                    dg, origen, direccion, distance=restante)
+                if not golpe:
+                    break
+                if objeto is not None and objeto.name == objeto_receptor:
+                    tapado = True
+                    break
+                avance = (ubicacion - origen).length + 1e-4
+                origen = ubicacion + direccion * 1e-4
+                restante -= avance
+                if restante <= 0:
+                    break
+            libres += 0 if tapado else 1
+        return libres / len(muestra)
+
+    return visible
+
+
 def ajustar_medidas(medidas, paq, rec, montado, formato):
     """El plano de `x` (sitio, conformaciones, poses) más un plano por corrida.
 
@@ -133,7 +178,11 @@ def ajustar_medidas(medidas, paq, rec, montado, formato):
     extra = montado.extra
     extra["puntos_instantaneas"] = extra.get("puntos_conformeros", [])
     medidas["conteos_y"] = conteos(montado)
-    escena_x.ajustar_medidas(medidas, paq, rec, montado, formato)
+    puntos = extra.get("ligando_dock_puntos") or []
+    escena_x.ajustar_medidas(medidas, paq, rec, montado, formato,
+                             visibilidad=_visibilidad_del_ligando(puntos) if puntos else None)
+    if puntos and isinstance(medidas.get("pose_sitio"), dict):
+        medidas["pose_sitio"]["criterio"] = "atomos_del_ligando"
     # `x` sale sin plan si no hay ningún punto del sitio que encuadrar: entonces
     # manda el plano único de `maestro.medir`, y aquí no hay nada que ampliar.
     if "plan_camara" not in medidas or not extra.get("puntos_corridas"):
