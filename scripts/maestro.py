@@ -153,6 +153,7 @@ def medir(paq, rec, montado, guion, formato) -> dict:
     for _id, _txt, _pos in montado.anclas:
         if _id.startswith("dist"):
             dianas.append(_pos)
+    sin_sujeto = not dianas
     if not dianas:
         # Un receptor sin ligando sigue teniendo geometría real alrededor de
         # la caja. Usarla sólo para la cámara evita una distancia cero sin
@@ -162,9 +163,9 @@ def medir(paq, rec, montado, guion, formato) -> dict:
         if not dianas or max((p - K).length for p in dianas) < 1e-6:
             raise ValueError("El receptor no contiene geometría para encuadrar")
 
-    provisional = encuadre.distancia(dianas, K, guion.LENTE_PRIMER_PLANO, asp,
-                                     guion.EL_PRIMER_PLANO, [0, 90, 180, 270],
-                                     margen=1.75)
+    provisional = encuadre.distancia_primer_plano(
+        dianas, K, guion.LENTE_PRIMER_PLANO, asp, guion.EL_PRIMER_PLANO,
+        [0, 90, 180, 270], margen=1.75)
 
     # Pose heroe: azimut Y elevacion, ponderando por grupo y premiando que las
     # dianas queden separadas en pantalla. Antes solo se buscaba el azimut, con
@@ -184,15 +185,15 @@ def medir(paq, rec, montado, guion, formato) -> dict:
         grupos = [("sitio", 1.0, dianas)]
 
     def _dist_req(az_, el_):
-        return encuadre.distancia(dianas, K, guion.LENTE_PRIMER_PLANO, asp,
-                                  el_, [az_], margen=1.75)
+        return encuadre.distancia_primer_plano(
+            dianas, K, guion.LENTE_PRIMER_PLANO, asp, el_, [az_], margen=1.75)
 
     pose = oclusion.mejor_pose(grupos, K, provisional, guion.LENTE_PRIMER_PLANO,
                                asp, distancia_requerida=_dist_req)
     az, el = pose["azimut"], pose["elevacion"]
     vis = oclusion.visibilidad(dianas, encuadre.posicion(K, az, el, provisional))
-    D0 = encuadre.distancia(dianas, K, guion.LENTE_PRIMER_PLANO, asp,
-                            el, [az], margen=1.75)
+    D0 = encuadre.distancia_primer_plano(
+        dianas, K, guion.LENTE_PRIMER_PLANO, asp, el, [az], margen=1.75)
 
     orbita = None
     if formato.bucle:
@@ -205,6 +206,16 @@ def medir(paq, rec, montado, guion, formato) -> dict:
             if formato.bucle else
             oclusion.mejor_arco(dianas, K, az - guion.SWEEP_GENERAL - 22.0,
                                 el, D0))
+
+    if sin_sujeto:
+        # Los puntos de `dianas` son átomos del PROPIO receptor: un rayo hacia ellos
+        # lo atraviesa por construcción, así que «visibilidad» no mide nada y daba
+        # una alerta falsa de sujeto tapado en un vídeo que no tiene sujeto.
+        arco = dict(arco, minimo=None, media=None,
+                    nota="sin sujeto: la oclusión del arco no se mide")
+        if orbita:
+            orbita = dict(orbita, minimo=None, media=None,
+                          nota="sin sujeto: la oclusión de la órbita no se mide")
 
     campos = encuadre.posicion(K, az, el, D0)
     cerca = [(p - K).length for p in pts if (p - campos).length < D0 * 1.7]

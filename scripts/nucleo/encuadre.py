@@ -81,6 +81,26 @@ def distancia_visible(puntos, centro, lente: float, aspecto: float,
     return peor * margen
 
 
+#: Aire mínimo (×distancia) que se exige a un plano de primer plano con la profundidad bien medida.
+AIRE_MINIMO = 1.15
+
+
+def distancia_primer_plano(puntos, centro, lente: float, aspecto: float,
+                           elevacion_deg: float, azimuts, margen: float = 1.75) -> float:
+    """La distancia de primer plano de siempre, sin bajar de la que cabe de verdad.
+
+    `distancia` con su margen amplio basta cuando el sujeto está repartido
+    alrededor del pivote (los guiones de ligando cocristalizado), y por eso las
+    escenas existentes se calibraron con ella. Pero subestima cuando el sujeto
+    queda ENTRE la cámara y el pivote: ahí `distancia_visible` pide más. Se toma
+    el mayor de los dos, así que un plano que ya cabía NO cambia, y uno que
+    recortaba al sujeto se abre lo justo (`AIRE_MINIMO`).
+    """
+    return max(distancia(puntos, centro, lente, aspecto, elevacion_deg, azimuts, margen),
+               distancia_visible(puntos, centro, lente, aspecto, elevacion_deg, azimuts,
+                                 AIRE_MINIMO))
+
+
 def posicion(centro: Vector, azimut_deg: float, elevacion_deg: float,
              dist: float) -> Vector:
     a, e = math.radians(azimut_deg), math.radians(elevacion_deg)

@@ -89,6 +89,26 @@ base = encuadre.distancia_visible(puntos, centro, 50.0, aspecto, 0.0, [0.0])
 comprobar("el margen multiplica", abs(encuadre.distancia_visible(
     puntos, centro, 50.0, aspecto, 0.0, [0.0], 1.5) - 1.5 * base) < 1e-6)
 
+# ── la distancia de primer plano: nunca recorta, y no mueve lo que ya cabía ──
+delante = [Vector((0.5, 0.20, 0.0)), Vector((0.5, -0.20, 0.0))]
+d_nueva = encuadre.distancia_primer_plano(delante, centro, 50.0, aspecto, 0.0, [0.0], margen=1.75)
+d_vieja = encuadre.distancia(delante, centro, 50.0, aspecto, 0.0, [0.0], margen=1.75)
+d_cabe = encuadre.distancia_visible(delante, centro, 50.0, aspecto, 0.0, [0.0], encuadre.AIRE_MINIMO)
+comprobar("con el sujeto delante del pivote la antigua queda corta y la nueva cabe",
+          d_vieja < d_cabe and d_nueva >= d_cabe - 1e-6)
+colocar(centro, 0.0, 0.0, d_nueva)
+comprobar("a esa distancia todo cae dentro del cuadro con aire",
+          all(0.02 < ndc(p)[0] < 0.98 and ndc(p)[2] > 0 for p in delante))
+colocar(centro, 0.0, 0.0, d_vieja)
+comprobar("con la antigua el sujeto se sale",
+          any(not (0.0 <= ndc(p)[0] <= 1.0) or ndc(p)[2] <= 0 for p in delante))
+
+# un sujeto repartido alrededor del pivote cabía con la antigua: el resultado NO cambia
+alrededor = [Vector((x, y, z)) for x in (-0.3, 0.3) for y in (-0.3, 0.3) for z in (-0.3, 0.3)]
+comprobar("lo que ya cabía no cambia",
+          abs(encuadre.distancia_primer_plano(alrededor, centro, 50.0, aspecto, 0.0, [0.0], margen=1.75)
+              - encuadre.distancia(alrededor, centro, 50.0, aspecto, 0.0, [0.0], margen=1.75)) < 1e-6)
+
 if fallos:
     print(f"FALLOS: {fallos}", flush=True)
     sys.exit(1)
