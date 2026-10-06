@@ -55,10 +55,15 @@ def _dock(tmp_path, con_traza=True, con_poses=True):
                   if con_poses else []),
     }
     if con_traza:
-        d["traza"] = {"tipo": "metropolis", "semilla": 7,
-                      "pasos": [{"i": i, "centro": [1.0 + i * 0.01, 2.0, 3.0],
-                                 "energia": -2.0 - i * 0.1, "aceptada": i % 3 == 0}
-                                for i in range(12)]}
+        snap = tmp_path / "docking" / "snapshot_001.pdb"
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        snap.write_text("HETATM    1  C1  LIG A   1       1.0   2.0   3.0\nEND\n",
+                        encoding="utf-8")
+        d["traza_interna"] = {
+            "tipo": "vina_monte_carlo_bfgs_interno", "replicas": 2,
+            "pasos_totales": 24, "pasos_replica": 12, "aceptados_totales": 8,
+            "instantaneas": [{"task": 0, "step": 6,
+                               "archivo": "docking/snapshot_001.pdb"}]}
     return d
 
 
@@ -102,6 +107,23 @@ def test_sujeto_disponible_solo_si_las_poses_existen_en_disco(tmp_path):
     assert not ok and "poses" in razon
 
 
+def test_sujeto_rechaza_instantaneas_ausentes(tmp_path):
+    d = _dock(tmp_path)
+    d["traza_interna"]["instantaneas"][0]["archivo"] = "docking/borrada.pdb"
+    ok, razon = suj_mc.disponible(_paquete(tmp_path, dock=d))
+    assert not ok and "instantaneas" in razon
+
+
+def test_ventanas_dan_turno_a_todas_las_poses_y_muestras():
+    rangos = {"busqueda": (61, 150), "convergencia": (151, 270)}
+    poses = guion_x.ventanas_poses(rangos, 9)
+    muestras = guion_x.ventanas_instantaneas(rangos, 12)
+    assert len(poses) == 9 and len(muestras) == 12
+    assert poses[0][0] == 151 and poses[-1][1] == 270
+    assert muestras[0][0] == 61 and muestras[-1][1] == 150
+    assert all(b + 1 == c for (_, b), (c, _) in zip(poses, poses[1:]))
+
+
 # ── el guion: registro, contrato con la matriz y reparto ────────────────────
 def test_el_guion_x_se_describe_sin_blender_y_fija_su_sujeto():
     # el catalogo AST es el que lee la interfaz, que no tiene mathutils
@@ -125,6 +147,11 @@ def test_con_sujeto_el_reparto_cubre_el_presupuesto_en_todos_los_formatos():
         beats = gui.resolver(guion_x.BEATS, None, {"sujeto": True}, f, acta)
         rangos, total = gui.repartir(beats, f)
         assert total == f.fotogramas, n
+        ajustados = guion_x.ajustar_rangos(rangos, f)
+        if not f.bucle:
+            assert ajustados["sitio"] == (1, f.fps)
+            assert ajustados["salida"] == (total - 3 * f.fps + 1, total)
+            assert list(ajustados) == ["sitio", "caja", "busqueda", "convergencia", "salida"]
 
 
 @pytest.mark.skipif(_SIN_BLENDER, reason="estados() corre dentro de Blender")
@@ -145,3 +172,14 @@ def test_estados_da_un_fotograma_por_cuadro():
     assert len(est) == total
     assert all({"pos", "objetivo", "lente", "diafragma", "gradiente",
                 "diso0", "diso1", "dist", "giro"} <= set(e) for e in est)
+
+
+def test_cpu_three_seconds_has_a_frame_for_each_native_sample():
+    from dataclasses import replace
+    formato = replace(fmt.cargar("biblioteca"), segundos=3.0, bucle=False)
+    rangos, n = gui.repartir(guion_x.BEATS, formato)
+    rangos = guion_x.ajustar_rangos(rangos, formato)
+    windows = guion_x.ventanas_instantaneas(rangos, 12)
+    assert n == 90
+    assert all(a <= b for a,b in windows)
+    assert rangos["salida"][1] == n

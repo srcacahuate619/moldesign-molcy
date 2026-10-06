@@ -145,7 +145,7 @@ def secuencia(destino: Path, frames, huella: str | None = None,
             "por_fotograma": round(seg / n, 3)}
 
 
-def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
+def pasada_titulo(destino: Path, nombre_objeto, ventana,
                   cada: int = 50) -> dict:
     """Segunda pasada solo-titulo, con alfa, para componer por encima.
 
@@ -163,8 +163,9 @@ def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
     """
     sc = bpy.context.scene
     cam = sc.camera
-    objeto = bpy.data.objects.get(nombre_objeto)
-    if objeto is None:
+    nombres = {nombre_objeto} if isinstance(nombre_objeto, str) else set(nombre_objeto)
+    objetos = [bpy.data.objects.get(n) for n in nombres]
+    if not nombres or any(o is None for o in objetos):
         return {"fotogramas": 0, "razon": f"no existe {nombre_objeto}"}
     if destino.exists():
         shutil.rmtree(destino)
@@ -176,14 +177,15 @@ def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
     film = sc.render.film_transparent
     color = sc.render.image_settings.color_mode
     sello = sc.render.use_stamp
-    visible = objeto.visible_camera
+    visible = {o.name: o.visible_camera for o in objetos}
     dof = cam.data.dof.use_dof if cam else False
     t0 = time.time()
     try:
         for o in bpy.data.objects:
             if o.type == "MESH":
-                o.hide_render = o.name != nombre_objeto
-        objeto.visible_camera = True
+                o.hide_render = o.name not in nombres
+        for o in objetos:
+            o.visible_camera = True
         sc.render.film_transparent = True
         sc.render.use_stamp = False     # el sello ya va quemado en el principal
         if cam:
@@ -192,6 +194,11 @@ def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
         for i, f in enumerate(frames):
             comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
             sc.frame_set(f)
+            # Subject keyframes may unhide meshes when the frame changes.
+            # Keep only the label meshes; retain their own visibility windows.
+            for o in bpy.data.objects:
+                if o.type == "MESH" and o.name not in nombres:
+                    o.hide_render = True
             sc.render.filepath = str(destino / f"f_{f:04d}")
             bpy.ops.render.render(write_still=True)
             if i % cada == 0:
@@ -201,7 +208,8 @@ def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
         for o in bpy.data.objects:
             if o.name in antes:
                 o.hide_render = antes[o.name]
-        objeto.visible_camera = visible
+        for o in objetos:
+            o.visible_camera = visible[o.name]
         sc.render.film_transparent = film
         sc.render.use_stamp = sello
         if cam:

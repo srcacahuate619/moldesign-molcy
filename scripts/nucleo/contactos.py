@@ -1,16 +1,17 @@
-"""Contactos polares medidos sobre las coordenadas del paquete. CONSTANTE.
+"""Contactos polares y apolares medidos sobre las coordenadas del paquete.
 
 QUE ES Y QUE NO ES
 ------------------
-Esto NO es un PLIF. No hay protonacion, no hay angulos donante-H-aceptor, no
-hay tipado quimico. Es lo que el caso 001 llama «medicion geometrica directa de
-distancias sobre las coordenadas del cristal, sin protonar»: pares de atomos
-pesados N/O a distancia de puente de hidrogeno.
+Esto NO es un PLIF. No hay protonacion ni angulos donante-H-aceptor. Los pares
+N/O son proximidades polares, no puentes H confirmados. Para contactos
+hidrofobicos se filtran carbonos unidos a heteroatomos y se exige una cadena
+lateral proteica, pero no se sustituyen los patrones SMARTS de ProLIF.
 
 El contrato lo permite explicitamente. En `no_dibujar.angulo_puente_hidrogeno`
 dice que `_estimate_hbond_angle` devuelve None a proposito porque el receptor no
 llega protonado, y que lo permitido en su lugar es «la linea punteada del
-contacto y su distancia en A, sin H». Exactamente esto.
+contacto y su distancia en A, sin H». Las poses de X vienen de Vina; la
+medicion se repite en cada una, sin interpolar o inventar contactos.
 
 Cuando el exportador exponga un `interactions.json` con ProLIF y
 `confirmado_por` (ver el estandar de oro de 001), habra que preferirlo y dejar
@@ -37,6 +38,9 @@ MIN_A, MAX_A = 2.4, 3.5
 POLARES = (7, 8)          # N, O
 METALES = (12, 20, 25, 26, 27, 28, 29, 30)   # Mg Ca Mn Fe Co Ni Cu Zn
 MAX_METAL_A = 2.6
+MAX_HIDROFOBICO_A = 4.5  # ProLIF: https://prolif.readthedocs.io/en/latest/source/modules/interaction-fingerprint.html
+MIN_HIDROFOBICO_A = 2.8  # evita representar solapamientos estericos
+ENLACE_CH_A = 1.9        # carbonos unidos a heteroatomos no son apolares
 
 
 @dataclass
@@ -47,7 +51,7 @@ class Contacto:
     resname: str
     resid: int
     cadena: str
-    tipo: str = "polar"       # polar | metal
+    tipo: str = "polar"       # polar | hidrofobico | metal
 
     @property
     def etiqueta(self) -> str:
@@ -88,7 +92,8 @@ def mapa_de_residuos(ruta_pdb) -> dict[int, str]:
 
 def medir(receptor_mol, sujeto_mol, cerca_de: Vector | None = None,
           radio_a: float = 14.0, nombres: dict[int, str] | None = None,
-          cadenas: list[str] | None = None) -> list[Contacto]:
+          cadenas: list[str] | None = None,
+          solo_residuos: set[tuple[str, int]] | None = None) -> list[Contacto]:
     """Contactos polares entre el sujeto y el receptor, por distancia.
 
     `cerca_de` acota la busqueda al entorno del sitio activo: sin eso, en un
@@ -129,15 +134,113 @@ def medir(receptor_mol, sujeto_mol, cerca_de: Vector | None = None,
             i = idx[k]
             numero = int(rid[i])
             ci = int(chid[i]) if chid is not None else -1
+            cadena = (cadenas[ci] if cadenas and 0 <= ci < len(cadenas)
+                      else str(ci))
+            if solo_residuos is not None and (cadena, numero) not in solo_residuos:
+                continue
             out.append(Contacto(
                 a=Vector(pr[i].tolist()), b=Vector(ps[j].tolist()),
                 distancia_a=float(d[k]) / ESCALA,
                 resname=(nombres or {}).get(numero, "?"),
                 resid=numero,
-                cadena=(cadenas[ci] if cadenas and 0 <= ci < len(cadenas)
-                        else str(ci))))
+                cadena=cadena))
     out.sort(key=lambda c: c.distancia_a)
     return out
+
+
+def _carbonos_apolares(z, pos, candidatos):
+    """Carbonos sin N/O/S/F/halogeno a distancia covalente.
+
+    La conectividad del PDB no contiene ordenes de enlace. Este filtro espacial
+    es deliberadamente conservador; no afirma energia de interaccion. Sigue
+    la exclusion de carbonos ligados a heteroatomos de ProLIF/PLIP, aunque
+    sin sus patrones SMARTS ni su analisis completo de grupos funcionales.
+    """
+    heteros = pos[np.isin(z, (7, 8, 9, 16, 17, 35, 53))]
+    idx = np.nonzero(candidatos & (z == 6))[0]
+    if not len(heteros):
+        return idx
+    corte2 = (ENLACE_CH_A * ESCALA) ** 2
+    return np.array([i for i in idx
+                     if not np.any(np.sum((heteros - pos[i]) ** 2, axis=1) < corte2)],
+                    dtype=int)
+
+
+def medir_hidrofobicos(receptor_mol, sujeto_mol,
+                       cerca_de: Vector | None = None, radio_a: float = 14.0,
+                       nombres: dict[int, str] | None = None,
+                       cadenas: list[str] | None = None,
+                       solo_residuos: set[tuple[str, int]] | None = None
+                       ) -> list[Contacto]:
+    """Proximidad entre carbonos apolares del ligando y cadenas laterales.
+
+    Umbral de 4.5 Å como ProLIF. Se excluyen C ligados a heteroatomos; en el
+    receptor se exige cadena lateral. Es un contacto geometrico compatible con
+    asociacion hidrofobica, no una energia de enlace ni un PLIF completo.
+    """
+    zr = receptor_mol.named_attribute("atomic_number")
+    pr = receptor_mol.named_attribute("position")
+    rid = receptor_mol.named_attribute("res_id")
+    try:
+        lado = receptor_mol.named_attribute("is_side_chain").astype(bool)
+    except Exception:
+        lado = np.zeros(len(zr), dtype=bool)  # sin evidencia, no inferir
+    try:
+        chid = receptor_mol.named_attribute("chain_id")
+    except Exception:
+        chid = None
+    if cerca_de is not None:
+        c = np.array(tuple(cerca_de))
+        lado &= np.linalg.norm(pr - c, axis=1) < radio_a * ESCALA
+    ir = _carbonos_apolares(zr, pr, lado)
+    zs = sujeto_mol.named_attribute("atomic_number")
+    ps = sujeto_mol.named_attribute("position")
+    js = _carbonos_apolares(zs, ps, np.ones(len(zs), dtype=bool))
+    lo, hi = MIN_HIDROFOBICO_A * ESCALA, MAX_HIDROFOBICO_A * ESCALA
+    out = []
+    for j in js:
+        d = np.linalg.norm(pr[ir] - ps[j], axis=1)
+        for k in np.nonzero((d >= lo) & (d <= hi))[0]:
+            i = ir[k]
+            numero = int(rid[i])
+            ci = int(chid[i]) if chid is not None else -1
+            cadena = (cadenas[ci] if cadenas and 0 <= ci < len(cadenas)
+                      else str(ci))
+            if solo_residuos is not None and (cadena, numero) not in solo_residuos:
+                continue
+            out.append(Contacto(
+                a=Vector(pr[i].tolist()), b=Vector(ps[j].tolist()),
+                distancia_a=float(d[k]) / ESCALA,
+                resname=(nombres or {}).get(numero, "?"),
+                resid=numero, cadena=cadena, tipo="hidrofobico"))
+    return sorted(out, key=lambda c: c.distancia_a)
+
+
+def elegir_por_tipo(polares, hidrofobicos, max_por_tipo=3, preferidos=()):
+    """Una linea por residuo y clase para evitar abanicos ilegibles."""
+    return (sin_duplicar_residuo(polares, max_por_tipo, preferidos) +
+            sin_duplicar_residuo(hidrofobicos, max_por_tipo, preferidos))
+
+
+def material_hidrofobico(nombre):
+    """Cian discontinuo, visualmente distinto del oro de contacto polar."""
+    m = bpy.data.materials.new(nombre)
+    m.use_nodes = True
+    nt = m.node_tree
+    nt.nodes.clear()
+    salida = nt.nodes.new("ShaderNodeOutputMaterial")
+    em = nt.nodes.new("ShaderNodeEmission")
+    em.inputs["Color"].default_value = (0.20, 0.82, 0.84, 1.0)
+    em.inputs["Strength"].default_value = 4.5
+    nt.links.new(em.outputs["Emission"], salida.inputs["Surface"])
+    return m
+
+
+def dibujar(nombre, c: Contacto, material):
+    if c.tipo == "hidrofobico":
+        return malla_punteada(nombre, c.a, c.b, material,
+                              trozos=4, grosor=0.019, relleno=0.72)
+    return malla_punteada(nombre, c.a, c.b, material)
 
 
 def sin_duplicar_residuo(contactos: list[Contacto], cuantos: int,

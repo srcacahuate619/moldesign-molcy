@@ -1,16 +1,15 @@
-"""SUJETO: la busqueda de Montecarlo de Vina sobre la caja de acoplamiento REAL.
+"""SUJETO: poses y estados retenidos de la búsqueda interna de Vina.
 
 Todo lo que se dibuja sale de `docking.json` del paquete, que produce
 molDesign-build: la caja son los parametros con los que CORRIO Vina (centro y
 tamano en Angstrom), las poses son las que el motor devolvio con su afinidad,
-y la traza es el muestreo Metropolis con la funcion de puntaje de Vina, tal
-cual salio, con el sembrado declarado. Nada se inventa aqui: si el contrato no
-lo trae, este sujeto se abstiene y dice que falta (ver `disponible`).
+y las instantáneas son configuraciones retenidas en monte_carlo.cpp tras la
+optimización local. Nada se inventa aquí: sin la traza instrumentada, X se
+abstiene (ver `disponible`).
 
-Nota de diseno (historica): este sujeto NO vive "en el sitio activo". Es una
-nube repartida por toda la caja de acoplamiento mas una magnitud que evoluciona
-en el tiempo. Por eso quien lo monta es el GUION `x`: plano fijo sobre la
-caja, sin pausas, y rotulos de pantalla en vez de etiquetas ancladas.
+El sitio biológico y la caja computacional no son equivalentes. Se conserva
+el sistema de coordenadas del receptor y se distinguen los estados de una
+réplica de las poses finales agregadas de todas las réplicas.
 """
 from __future__ import annotations
 
@@ -18,9 +17,9 @@ from nucleo.ciencia import ESCALA
 from variables.sujeto import Contexto, Montado, SujetoNoDisponible
 
 ID = "busqueda_montecarlo"
-DESCRIPCION = "La nube de poses candidatas y la puntuacion por iteracion."
+DESCRIPCION = "Ligando dockeado, estados internos y poses finales de Vina."
 
-MAX_POSES = 5            # las mejores; las demas constan en el acta
+MAX_POSES = None         # todas las poses devueltas por Vina
 MAX_RECHAZADAS = 400     # las aceptadas se dibujan TODAS; el rechazo se muestrea
 
 COLOR_CAJA = (0.36, 0.62, 1.0)
@@ -38,17 +37,22 @@ def disponible(paq) -> tuple[bool, str]:
                        "(schema moldesign.dock/1 con caja y poses). Lo genera "
                        "molDesign-build: `scripts/scene_export/"
                        "build_docking_package.py --pdb-id ...`")
-    if not (d.get("traza") or {}).get("pasos"):
-        return False, ("docking.json no trae la traza del muestreo "
-                       "(energia por iteracion, aceptados y rechazados). "
-                       "Sin ella no hay busqueda que contar")
+    traza = d.get("traza_interna") or {}
+    if traza.get("tipo") != "vina_monte_carlo_bfgs_interno" or not traza.get("instantaneas"):
+        return False, ("docking.json no trae estados de la busqueda interna "
+                       "instrumentada de Vina; el muestreo independiente no sirve para X")
     faltantes = [p["archivo"] for p in d["poses"]
                  if not p.get("archivo") or paq.ruta_dock(p["archivo"]) is None]
     if faltantes:
         return False, ("docking.json cita poses que no estan en el paquete: "
                        + ", ".join(faltantes[:3]))
+    faltantes = [p["archivo"] for p in traza["instantaneas"]
+                 if not p.get("archivo") or paq.ruta_dock(p["archivo"]) is None]
+    if faltantes:
+        return False, ("faltan instantaneas internas de Vina: "
+                       + ", ".join(faltantes[:3]))
     return True, (f"{len(d['poses'])} poses, "
-                  f"{len(d['traza']['pasos'])} pasos de muestreo")
+                  f"{traza['pasos_totales']} pasos internos en {traza['replicas']} replicas")
 
 
 # ── geometria ───────────────────────────────────────────────────────────────
@@ -121,6 +125,58 @@ def _nube(nombre: str, puntos: list[Vector], radio: float, mat):
     return obj
 
 
+def _trayectoria(nombre: str, puntos: list[Vector], grosor: float, mat):
+    """Polilinea de estados aceptados; el guion revela el prefijo observado."""
+    if len(puntos) < 2:
+        return None
+    cu = bpy.data.curves.new(nombre, "CURVE")
+    cu.dimensions = "3D"
+    cu.bevel_depth = grosor
+    cu.bevel_resolution = 1
+    cu.bevel_factor_end = 0.0
+    spline = cu.splines.new("POLY")
+    spline.points.add(len(puntos) - 1)
+    for i, p in enumerate(puntos):
+        spline.points[i].co = (*p, 1.0)
+    cu.materials.append(mat)
+    obj = bpy.data.objects.new(nombre, cu)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def _silueta_anterior(nombre: str, mol, mat):
+    """Enlaces de una muestra REAL anterior, para comparar dos estados.
+
+    No une posiciones ni interpola un camino: cada segmento es un enlace
+    inferido dentro de la geometria retenida que Vina escribio.
+    """
+    pos = mol.named_attribute("position")
+    z = mol.named_attribute("atomic_number")
+    cu = bpy.data.curves.new(nombre, "CURVE")
+    cu.dimensions = "3D"
+    cu.bevel_depth = 0.016
+    cu.bevel_resolution = 1
+    for edge in mol.object.data.edges:
+        a, b = tuple(edge.vertices)
+        if int(z[a]) == 1 or int(z[b]) == 1:
+            continue
+        spline = cu.splines.new("POLY")
+        spline.points.add(1)
+        spline.points[0].co = (*pos[a], 1.0)
+        spline.points[1].co = (*pos[b], 1.0)
+    cu.materials.append(mat)
+    obj = bpy.data.objects.new(nombre, cu)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def _caminante(nombre, posicion, radio, mat):
+    """Posicion absoluta solo en el objeto; geometria local centrada."""
+    obj = _esfera(nombre, Vector((0, 0, 0)), radio, mat)
+    obj.location = posicion
+    return obj
+
+
 def _material_translucido(nombre: str, color: tuple, alfa: float):
     m = bpy.data.materials.new(nombre)
     m.use_nodes = True
@@ -148,11 +204,14 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     import bpy                                                               # noqa: E402
     import bl_ext.blender_org.molecularnodes as mn                           # noqa: E402
     from mathutils import Matrix, Vector                                     # noqa: E402
-    from nucleo import arte, receptor                                        # noqa: E402
+    from nucleo import arte, receptor, contactos                             # noqa: E402
     d = paq.dock
     pref = f"{paq.pdb_id}_Dock_"
 
     m = Montado()
+    from sujetos.ligando_cocristal import inferir_enlaces
+    m.notas.append("La escena X muestra el ligando en sus poses calculadas "
+                   "por Vina; la coordenada cristalografica no se dibuja.")
     centro_a = Vector(d["caja"]["centro"])
     tam_a = Vector(d["caja"]["tamano"])
     centro_b = centro_a * ESCALA
@@ -164,9 +223,9 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
         raise SujetoNoDisponible("faltan archivos de pose: " + ", ".join(faltantes))
 
     # caja: los parametros con los que CORRIO el motor
-    mat_caja = _material_emision(pref + "Caja", COLOR_CAJA, 4.0)
+    mat_caja = _material_emision(pref + "Caja", COLOR_CAJA, 1.5)
     caja_obj, esquinas = _caja(pref + "Caja", centro_b, tam_b,
-                               max(tam_b) * 0.004, mat_caja)
+                               max(tam_b) * 0.0015, mat_caja)
     m.objetos.append(caja_obj)
     m.materiales.append(mat_caja)
     s, sy, sz = (float(v) for v in tam_a)
@@ -174,12 +233,9 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                      Vector(esquinas[7])))
     m.medido["caja_a"] = {"centro": [round(v, 3) for v in centro_a],
                           "tamano": [round(v, 3) for v in tam_a]}
-    # La caja es el encuadre de AMBOS planos en esta escena: en el general por
-    # contexto y de cerca porque ES el sujeto. Que el plano de cerca quede más
-    # lejos que el general del receptor es correcto aquí: la cámara da un paso
-    # atrás para mostrar dónde buscó el algoritmo (ver _TOLERANCIA_QC).
+    # La caja solo se encuadra en la retirada: el primer plano pertenece al
+    # ligando dockeado, no al volumen computacional completo.
     m.dianas_generales += [Vector(v) for v in esquinas]
-    m.dianas += [Vector(v) for v in esquinas]
 
     # esfera de evidencia: radio medido por dispersion de hotspots
     radio_a = min(tam_a) / 2.0
@@ -194,54 +250,57 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
             radio_a = max(distancias)
             m.medido["esfera_radio_a"] = round(radio_a, 2)
     mat_esfera = _material_translucido(pref + "Esfera", COLOR_ESFERA, 0.10)
-    m.objetos.append(_esfera(pref + "Esfera", centro_b, radio_a * ESCALA,
+    m.objetos.append(_esfera(pref + "Esfera", ctx.pivote, radio_a * ESCALA,
                              mat_esfera))
     m.materiales.append(mat_esfera)
 
-    # traza del muestreo: aceptadas enteras, rechazadas muestreadas y declarado
-    pasos = d["traza"]["pasos"]
-    aceptadas = [p for p in pasos if p.get("aceptada")]
-    rechazadas = [p for p in pasos if not p.get("aceptada")]
-    if len(rechazadas) > MAX_RECHAZADAS:
-        n = len(rechazadas)
-        rechazadas = [rechazadas[i * n // MAX_RECHAZADAS]
-                      for i in range(MAX_RECHAZADAS)]
-        m.notas.append(
-            f"traza: de los {n} pasos rechazados se dibuja una muestra "
-            f"uniforme de {MAX_RECHAZADAS} (los {len(aceptadas)} pasos "
-            "aceptados se dibujan TODOS). La energia por iteracion completa "
-            "sigue en docking.json.")
-    r_acep, r_rech = max(tam_b) * 0.010, max(tam_b) * 0.005
-    mat_acep = _material_emision(pref + "Aceptadas", COLOR_ACEPTADA, 6.0)
-    mat_rech = _material_emision(pref + "Rechazadas", COLOR_RECHAZADA, 1.2)
-    pts_a = [Vector(p["centro"]) * ESCALA for p in aceptadas]
-    pts_r = [Vector(p["centro"]) * ESCALA for p in rechazadas]
-    nube_a = _nube(pref + "Aceptadas", pts_a, r_acep, mat_acep)
-    nube_r = _nube(pref + "Rechazadas", pts_r, r_rech, mat_rech)
-    for o in (nube_a, nube_r):
-        if o is not None:
-            m.objetos.append(o)
-    m.materiales += [mat_acep, mat_rech]
-    m.dianas += (pts_a + pts_r)[:: max(1, len(pts_a + pts_r) // 40)]
-
-    # el caminante: recorre por la caja los pasos ACEPTADOS, que es lo unico
-    # que se mueve en un muestreo Metropolis. Su ruta sale de la traza real.
-    mat_cam = _material_emision(pref + "Caminante", COLOR_CAMINANTE, 10.0)
-    cam = _esfera(pref + "Caminante", pts_a[0] if pts_a else centro_b,
-                  r_acep * 2.6, mat_cam)
-    m.objetos.append(cam)
-    m.materiales.append(mat_cam)
-    m.extra["caminante"] = cam.name
-    m.extra["traza_aceptados"] = [tuple(p) for p in pts_a]
+    traza = d["traza_interna"]
+    m.extra["traza_interna"] = traza
+    m.extra["instantaneas"] = []
+    mat_anterior = _material_emision(pref + "EstadoAnterior",
+                                     (0.62, 0.48, 1.0), 2.5)
+    anterior = None
+    for i, p in enumerate(traza["instantaneas"], 1):
+        ruta = paq.ruta_dock(p["archivo"])
+        mol = mn.Molecule.load(str(ruta), name=f"{pref}EstadoInterno{i:02d}")
+        inferir_enlaces(mol.object)
+        mol.add_style("ball_and_stick", name=f"estado_interno_{i}")
+        mat = arte.material_del_estilo(mol, "Ball and Stick",
+                                       f"{pref}EstadoInterno{i:02d}_mat")
+        if mat:
+            arte.realzar_protagonista(mat)
+        fantasma = (_silueta_anterior(pref + f"Anterior{i:02d}", anterior,
+                                      mat_anterior)
+                    if anterior is not None else None)
+        m.extra["instantaneas"].append({"nombre": mol.object.name,
+                                          "step": p["step"], "task": p["task"],
+                                          "metrica_interna": p.get("metrica_interna"),
+                                          "fantasma": (fantasma.name if fantasma else None)})
+        anterior = mol
+    m.notas.append("La animacion muestra estados retenidos de la replica 1 "
+                   f"de {traza['replicas']}; el contador total suma cada paso interno de las {traza['replicas']} "
+                   "replicas. Los estados no son dinamica molecular ni una "
+                   "interpolacion del movimiento fisico del ligando. La silueta "
+                   "violeta corresponde exactamente a la muestra anterior.")
 
     # poses del acoplamiento, orden del motor, mejor primero
-    poses = sorted(d["poses"], key=lambda p: p.get("rank", 99))[:MAX_POSES]
+    poses = sorted(d["poses"], key=lambda p: p.get("rank", 99))
+    m.extra["poses"] = []
+    m.extra["contactos_por_pose"] = {}
+    nombres = contactos.mapa_de_residuos(paq.ruta("prepared"))
+    cadenas = paq.cadenas_conservadas or [paq.cadena_principal]
+    hotspots = {(h.cadena, h.numero) for h in (ctx.receptor.hotspots or [])}
+    mat_polar = arte.copiar_material(ctx.arte["HBond_EGFR_Gold"],
+                                     pref + "ContactoPolar")
+    arte.subir_emision(mat_polar, 6.0)
+    mat_apolar = contactos.material_hidrofobico(pref + "ContactoHidrofobico")
+    m.extra["materiales_contacto"] = [mat_polar, mat_apolar]
+    datos_contactos = []
     for p in poses:
         ruta = paq.ruta_dock(p["archivo"])
         mol = mn.Molecule.load(str(ruta), name=f"{pref}Pose{p['rank']}")
         # el PDB de la pose no trae CONECT (como site_ligand.pdb): enlaces por
         # distancia, misma convención declarada del ligando cocristalizado
-        from sujetos.ligando_cocristal import inferir_enlaces
         inferir_enlaces(mol.object)
         mol.add_style("ball_and_stick", name=f"pose{p['rank']}")
         mat = arte.material_del_estilo(mol, "Ball and Stick",
@@ -250,8 +309,36 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
             arte.realzar_protagonista(mat)
         obj = mol.object
         m.secundarios.append(obj)
+        m.extra["poses"].append({"nombre": obj.name, "rank": p["rank"],
+                                  "afinidad": p.get("afinidad_kcal_mol"),
+                                  "rmsd_vina_inferior_a": p.get("rmsd_vina_inferior_a"),
+                                  "rmsd_vina_superior_a": p.get("rmsd_vina_superior_a")})
         if mat:
             m.materiales_secundarios.append(mat)
+        polares = contactos.medir(
+            ctx.receptor.molecula, mol, cerca_de=ctx.pivote,
+            nombres=nombres, cadenas=cadenas, solo_residuos=hotspots)
+        apolares = contactos.medir_hidrofobicos(
+            ctx.receptor.molecula, mol, cerca_de=ctx.pivote,
+            nombres=nombres, cadenas=cadenas, solo_residuos=hotspots)
+        elegidos = contactos.elegir_por_tipo(polares, apolares, 3,
+                                            preferidos=[h[1] for h in hotspots])
+        lineas = []
+        for j, contacto in enumerate(elegidos):
+            material = mat_apolar if contacto.tipo == "hidrofobico" else mat_polar
+            linea = contactos.dibujar(
+                f"{pref}Pose{p['rank']}_{contacto.tipo}_{j}", contacto, material)
+            if linea is not None:
+                lineas.append(linea.name)
+            datos_contactos.append({"pose": p["rank"], "tipo": contacto.tipo,
+                                    "resname": contacto.resname,
+                                    "resid": contacto.resid,
+                                    "cadena": contacto.cadena,
+                                    "distancia_a": round(contacto.distancia_a, 2)})
+        m.extra["contactos_por_pose"][p["rank"]] = lineas
+        m.extra["poses"][-1]["contactos"] = {
+            "polares": sum(c.tipo == "polar" for c in elegidos),
+            "hidrofobicos": sum(c.tipo == "hidrofobico" for c in elegidos)}
         c = arte.centro_evaluado(obj)
         af = p.get("afinidad_kcal_mol")
         texto = f"#{p['rank']}" + (f"  {af:.1f} kcal/mol"
@@ -259,6 +346,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
         m.anclas.append((f"pose{p['rank']}", texto, c))
         m.dianas.append(c)
         if p["rank"] == 1:
+            m.extra["ligando_dock_puntos"] = arte.puntos_evaluados(obj)
             m.medido["mejor_pose"] = {k: p.get(k) for k in
                                       ("afinidad_kcal_mol", "rmsd_cristal_a")}
             rmsd = p.get("rmsd_cristal_a")
@@ -266,14 +354,19 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                 m.anclas.append(("rmsd", f"RMSD {rmsd:.2f} A vs cristal", c))
 
     m.medido["n_poses_dibujadas"] = len(poses)
-    m.medido["n_pasos"] = len(pasos)
-    m.medido["n_aceptados"] = len(aceptadas)
+    m.medido["contactos"] = datos_contactos
+    m.medido["residuos_de_contacto"] = sorted({c["resid"] for c in datos_contactos})
+    m.notas.append("Contactos por cada pose final solo con hotspots: oro = "
+                   "proximidad polar N/O; cian = carbonos apolares de cadena "
+                   "lateral a 2.8-4.5 A. Son contactos geometricos, no "
+                   "puentes H confirmados ni energias de union.")
+    m.medido["n_pasos"] = traza["pasos_totales"]
+    m.medido["n_aceptados"] = traza["aceptados_totales"]
+    m.medido["n_replicas"] = traza["replicas"]
+    m.medido["n_instantaneas"] = len(traza["instantaneas"])
+    m.medido["metricas_internas_por_muestra"] = [
+        {"step": p["step"], **p["metrica_interna"]}
+        for p in traza["instantaneas"] if p.get("metrica_interna")]
+    m.medido["traza_es_busqueda_interna_vina"] = True
     m.medido["motor"] = d.get("motor", {})
-    if aceptadas:
-        m.notas.append(
-            f"traza {d['traza'].get('tipo', 'muestreo')} con semilla "
-            f"{d['traza'].get('semilla')}: {len(aceptadas)} aceptados de "
-            f"{len(pasos)} pasos. La afinidad de las poses sale de la corrida "
-            "de acoplamiento real; el muestreo no incluye refinado por "
-            "gradiente (el MC puro de Vina).")
     return m

@@ -107,8 +107,10 @@ def vista_previa(pos: float, salida: str, formato, rangos, n_frames,
     sc = bpy.context.scene
     f = 1 + int(round(min(100.0, max(0.0, pos)) / 100.0 * (n_frames - 1)))
     beat = next((b for b, (i, j) in rangos.items() if i <= f <= j), "")
-    if capa_titulo and bpy.data.objects.get(capa_titulo["objeto"]):
-        bpy.data.objects[capa_titulo["objeto"]].visible_camera = True
+    if capa_titulo:
+        for nombre in capa_titulo.get("objetos", [capa_titulo.get("objeto")]):
+            if nombre and bpy.data.objects.get(nombre):
+                bpy.data.objects[nombre].visible_camera = True
     pct = min(formato.escala_render, 50)
     sc.render.stamp_font_size = max(8, int(sc.render.stamp_font_size * pct
                                            / formato.escala_render))
@@ -331,8 +333,13 @@ def main() -> int:
         print(f"VARILLAS: residuos {dibujados}")
 
     # guion x formato
+    if guion.NOMBRE == "x":
+        from dataclasses import replace
+        formato = replace(formato, papeles=None, bucle=False)
     beats = gui.resolver(guion.BEATS, paq, {"sujeto": ok}, formato, acta)
     rangos, n_frames = gui.repartir(beats, formato)
+    if hasattr(guion, "ajustar_rangos"):
+        rangos = guion.ajustar_rangos(rangos, formato)
     frames = list(range(1, n_frames + 1))
     sc.frame_start, sc.frame_end = 1, n_frames
     render.configurar(formato, a.renderizador)
@@ -345,6 +352,8 @@ def main() -> int:
               f" -> {d.get('a') or 'omitido'} ({d.get('regla') or d.get('motivo')})")
 
     medidas = medir(paq, rec, montado, guion, formato)
+    if hasattr(guion, "ajustar_medidas"):
+        guion.ajustar_medidas(medidas, paq, rec, montado, formato)
     ph = medidas["pose_heroe"]
     print(f"MEDIDO: D_gen={medidas['dist_general']:.2f} D_cerca={medidas['dist_primer_plano']:.2f} "
           f"pose az={medidas['azimut']:.0f} el={medidas['elevacion']:.0f} "
@@ -485,13 +494,31 @@ def main() -> int:
             creados.append(t)
             # El titulo va a la profundidad del receptor, asi que la geometria
             # por delante puede taparlo: se rinde aparte y se compone encima.
-            capa_titulo = {"objeto": t.objeto.name,
+            capa_titulo = {"objeto": t.objeto.name, "objetos": [t.objeto.name],
                            "ventana": tuple(cfg_tit["ventana"])}
             # El titulo se ve SOLO por su pasada aislada (nitida, sin DoF); en
             # el pase principal se esconde para que su copia suave no asome por
             # los bordes del texto bueno y lo haga leer borroso.
             t.objeto.visible_camera = False
             print(f"TITULO: {t.texto}")
+        if hasattr(guion, "rotulos_datos"):
+            for cfg in guion.rotulos_datos(rangos, formato, formato.fps, montado):
+                dato = rotulos.crear_pantalla(
+                    cfg["id"], cfg["texto"], rig.camara, proto,
+                    esquina=cfg.get("esquina", "superior_izquierda"),
+                    escala_texto=cfg.get("escala", formato.escala_texto),
+                    lente_referencia=guion.LENTE_PRIMER_PLANO,
+                    distancia=medidas["dist_sitio"] if "dist_sitio" in medidas
+                    else medidas["dist_primer_plano"])
+                dato.ventana = tuple(cfg["ventana"])
+                creados.append(dato)
+                dato.objeto.visible_camera = False
+                if capa_titulo is None:
+                    capa_titulo = {"objetos": [], "ventana": dato.ventana}
+                capa_titulo["objetos"].append(dato.objeto.name)
+                capa_titulo["ventana"] = (
+                    min(capa_titulo["ventana"][0], dato.ventana[0]),
+                    max(capa_titulo["ventana"][1], dato.ventana[1]))
     rotulos.hornear(creados, frames)
     # Credito de marca en vez de la ficha tecnica: el pdb_id y el sha siguen en
     # el acta y el MANIFEST, y la esquina inferior ya identifica la estructura.
@@ -582,10 +609,10 @@ def main() -> int:
     info = render.secuencia(destino / f"render_{formato.nombre}{sufijo}", frames,
                             huella=huella)
     registro["render"] = info
-    if capa_titulo and bpy.data.objects.get(capa_titulo["objeto"]):
+    if capa_titulo:
         info_capa = render.pasada_titulo(
             destino / f"render_{formato.nombre}{sufijo}_titulo",
-            capa_titulo["objeto"], capa_titulo["ventana"])
+            capa_titulo.get("objetos", [capa_titulo.get("objeto")]), capa_titulo["ventana"])
         capa_titulo.update(info_capa)
         print(f"CAPA_TITULO: {info_capa['fotogramas']} fotogramas de titulo "
               f"con alfa; se componen por encima al codificar")

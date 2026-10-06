@@ -54,3 +54,7 @@ ficheros, no sobre la marca. Una versión modificada que se distribuya debe quit
 
 Los vídeos que el motor genera no están cubiertos por la GPL (igual que lo que se renderiza con Blender), y todo vídeo que genera MolDesign termina con el cierre de
 la marca: el motor no ofrece ningún mando para quitarlo.
+
+## Búsqueda interna de Vina
+
+El guion `x` utiliza `traza_interna.tipo = vina_monte_carlo_bfgs_interno`: estados retenidos muestreados de una réplica, métricas reales por paso y contadores de todas las réplicas. No acepta el muestreo Metropolis independiente anterior. Sin archivos verificables se abstiene. El número de réplicas procede de la corrida y la animación no interpola movimiento físico. El cierre de MolDesign sigue siendo obligatorio.
