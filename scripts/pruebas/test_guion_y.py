@@ -377,3 +377,11 @@ def test_la_visibilidad_del_ligando_es_una_funcion_con_la_firma_de_la_de_x():
 
 def test_no_se_lanzan_mas_rayos_de_los_que_el_tope_permite():
     assert guion_y.MAX_PUNTOS_VISIBILIDAD <= 120
+
+
+def test_la_zona_reservada_al_texto_cubre_el_bloque_de_cuatro_lineas_de_una_pose():
+    """Medido en el vídeo vertical real: el bloque llega a x≈0.6 (NDC) y a y≈0.62."""
+    x0, y0, x1, y1 = suj.ZONA_TEXTO_PANTALLA
+    assert x0 <= -1.0 and y1 >= 1.0
+    assert x1 >= 0.65
+    assert y0 <= 0.60

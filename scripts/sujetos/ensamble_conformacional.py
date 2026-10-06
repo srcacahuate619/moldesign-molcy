@@ -25,6 +25,11 @@ import hashlib
 
 from variables.sujeto import Contexto, Montado, SujetoNoDisponible
 
+#: Zona de la pantalla (NDC: x0, y0, x1, y1) que ocupa el texto de datos de arriba a la izquierda y
+#: donde no se colocan rótulos 3D. El bloque de una pose son CUATRO líneas y llega a x≈0.6 en un
+#: formato vertical: con la zona de `x` (hasta 0.40) la etiqueta de un residuo lo pisaba.
+ZONA_TEXTO_PANTALLA = (-1.0, 0.45, 0.75, 1.0)
+
 ID = "ensamble_conformacional"
 DESCRIPCION = ("Conformaciones de entrada, poses entregadas del ensamble de Vina "
                "y sus controles físicos.")
@@ -207,7 +212,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     # Los rótulos de las interacciones van por encima de la geometría (ver `maestro`)
     # y el texto de pantalla ocupa la esquina superior izquierda: no se colocan ahí.
     m.extra["rotulos_encima"] = True
-    m.extra["zona_texto_pantalla"] = [(-1.0, 0.45, 0.40, 1.0)]
+    m.extra["zona_texto_pantalla"] = [ZONA_TEXTO_PANTALLA]
     m.notas.append("Interacciones de cada pose entregada contra los residuos de su "
                    "bolsillo (hotspots primero): polares y apolares, cada una con su "
                    "linea y su rotulo de residuo, clase y distancia. " + interacciones.NOTA)
