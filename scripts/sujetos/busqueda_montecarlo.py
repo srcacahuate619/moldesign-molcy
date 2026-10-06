@@ -250,13 +250,20 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
             radio_a = max(distancias)
             m.medido["esfera_radio_a"] = round(radio_a, 2)
     mat_esfera = _material_translucido(pref + "Esfera", COLOR_ESFERA, 0.10)
-    m.objetos.append(_esfera(pref + "Esfera", ctx.pivote, radio_a * ESCALA,
-                             mat_esfera))
-    m.materiales.append(mat_esfera)
+    # La esfera NO entra con la caja: durante la búsqueda sólo estorba (su grano
+    # tapa el receptor). El guion la hace aparecer en la retirada final.
+    m.extra["esfera"] = {"objeto": _esfera(pref + "Esfera", ctx.pivote,
+                                           radio_a * ESCALA, mat_esfera),
+                         "material": mat_esfera}
 
     traza = d["traza_interna"]
     m.extra["traza_interna"] = traza
     m.extra["instantaneas"] = []
+    #: Geometría real (mundo, unidades de Blender) de cada estado y de cada pose:
+    #: la cámara del guion encuadra con ella TODO lo que va a enseñar, no sólo
+    #: la mejor pose.
+    m.extra["puntos_instantaneas"] = []
+    m.extra["puntos_poses"] = []
     mat_anterior = _material_emision(pref + "EstadoAnterior",
                                      (0.62, 0.48, 1.0), 2.5)
     anterior = None
@@ -276,6 +283,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                                           "step": p["step"], "task": p["task"],
                                           "metrica_interna": p.get("metrica_interna"),
                                           "fantasma": (fantasma.name if fantasma else None)})
+        m.extra["puntos_instantaneas"].append(arte.puntos_evaluados(mol.object))
         anterior = mol
     m.notas.append("La animacion muestra estados retenidos de la replica 1 "
                    f"de {traza['replicas']}; el contador total suma cada paso interno de las {traza['replicas']} "
@@ -345,6 +353,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                                    if isinstance(af, (int, float)) else "")
         m.anclas.append((f"pose{p['rank']}", texto, c))
         m.dianas.append(c)
+        m.extra["puntos_poses"].append(arte.puntos_evaluados(obj))
         if p["rank"] == 1:
             m.extra["ligando_dock_puntos"] = arte.puntos_evaluados(obj)
             m.medido["mejor_pose"] = {k: p.get(k) for k in

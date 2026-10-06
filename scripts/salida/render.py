@@ -12,6 +12,9 @@ import bpy
 #: medio escribir (proceso muerto) no lo tiene.
 _FIN_PNG = b"\x00\x00\x00\x00IEND\xaeB`\x82"
 _ESPACIO_MINIMO = 1024 ** 3
+#: Tipos de objeto con geometría que se rinde. Los rótulos son FONT y no están aquí.
+_GEOMETRIA = frozenset({"MESH", "CURVE", "SURFACE", "META", "CURVES", "POINTCLOUD",
+                        "VOLUME", "GREASEPENCIL"})
 
 
 def comprobar_espacio(destino: Path, ancho: int, alto: int) -> None:
@@ -179,11 +182,26 @@ def pasada_titulo(destino: Path, nombre_objeto, ventana,
     sello = sc.render.use_stamp
     visible = {o.name: o.visible_camera for o in objetos}
     dof = cam.data.dof.use_dof if cam else False
+    # Todo lo que se rinde y no es un rotulo. Antes sólo se apagaban las MALLAS, y
+    # además con `hide_render`, que en el sujeto y en la caja está ANIMADO: la
+    # animación se evalúa después de asignar la propiedad y gana, así que el
+    # ligando (animado) y la caja (una curva) salían en la capa del título y,
+    # por ir más cerca de la cámara que el rótulo, lo tapaban.
+    ocultables = [o for o in bpy.data.objects
+                  if o.type in _GEOMETRIA and o.name not in nombres]
+    acciones: dict[str, tuple] = {}
     t0 = time.time()
+
+    def apagar_geometria() -> None:
+        for o in ocultables:
+            datos = o.animation_data
+            if datos is not None and datos.action is not None and o.name not in acciones:
+                acciones[o.name] = (datos.action, getattr(datos, "action_slot", None))
+                datos.action = None
+            o.hide_render = True
+
     try:
-        for o in bpy.data.objects:
-            if o.type == "MESH":
-                o.hide_render = o.name not in nombres
+        apagar_geometria()
         for o in objetos:
             o.visible_camera = True
         sc.render.film_transparent = True
@@ -194,17 +212,23 @@ def pasada_titulo(destino: Path, nombre_objeto, ventana,
         for i, f in enumerate(frames):
             comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
             sc.frame_set(f)
-            # Subject keyframes may unhide meshes when the frame changes.
-            # Keep only the label meshes; retain their own visibility windows.
-            for o in bpy.data.objects:
-                if o.type == "MESH" and o.name not in nombres:
-                    o.hide_render = True
+            apagar_geometria()
             sc.render.filepath = str(destino / f"f_{f:04d}")
             bpy.ops.render.render(write_still=True)
             if i % cada == 0:
                 print(f"TITULO_PASADA {i + 1}/{len(frames)}  "
                       f"{time.time() - t0:.0f}s", flush=True)
     finally:
+        for nombre, (accion, ranura) in acciones.items():
+            objeto = bpy.data.objects.get(nombre)
+            if objeto is None or objeto.animation_data is None:
+                continue
+            objeto.animation_data.action = accion
+            if ranura is not None:
+                try:
+                    objeto.animation_data.action_slot = ranura
+                except (AttributeError, TypeError, RuntimeError):
+                    pass
         for o in bpy.data.objects:
             if o.name in antes:
                 o.hide_render = antes[o.name]

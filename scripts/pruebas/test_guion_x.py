@@ -183,3 +183,84 @@ def test_cpu_three_seconds_has_a_frame_for_each_native_sample():
     assert n == 90
     assert all(a <= b for a,b in windows)
     assert rangos["salida"][1] == n
+
+
+# ── los rótulos y el plano de cámara ────────────────────────────────────────
+def _montado_con_rotulos():
+    from types import SimpleNamespace
+    poses = [{"nombre": f"P{i}", "rank": i, "afinidad": -6.0 - i / 10,
+              "rmsd_vina_inferior_a": 1.0 * i,
+              "contactos": {"polares": 2, "hidrofobicos": 3}} for i in range(1, 4)]
+    muestras = [{"nombre": f"S{i}", "step": 1602 * i, "task": 0,
+                 "fantasma": f"A{i}" if i > 1 else None,
+                 "metrica_interna": {"candidata": 1.0, "retenida": -5.46,
+                                     "mejor_hasta_paso": -7.05,
+                                     "aceptada_en_paso": bool(i % 2),
+                                     "aceptadas_acumuladas": 6213}}
+                for i in range(1, 4)]
+    traza = {"replicas": 8, "pasos_replica": 16065, "pasos_totales": 128520,
+             "torsiones_activas": 3}
+    return SimpleNamespace(extra={"poses": poses, "instantaneas": muestras,
+                                  "traza_interna": traza, "contactos_visibles": True})
+
+
+def _rangos_x(nombre="social_vertical"):
+    formato = fmt.cargar(nombre)
+    beats = gui.resolver(guion_x.BEATS, None, {"sujeto": True}, formato, Acta())
+    rangos, _ = gui.repartir(beats, formato)
+    return formato, guion_x.ajustar_rangos(rangos, formato)
+
+
+def test_ningun_rotulo_de_x_pasa_de_36_caracteres_por_linea():
+    # En 9:16 caben ~36; «ESTADO RETENIDO … | PROPUESTA ACEPTADA» (43) se salía del cuadro.
+    formato, rangos = _rangos_x()
+    rotulos = guion_x.rotulos_datos(rangos, formato, formato.fps, _montado_con_rotulos())
+    assert rotulos
+    for r in rotulos:
+        for linea in r["texto"].split("\n"):
+            assert len(linea) <= 36, (r["id"], linea)
+
+
+def test_la_caja_aparece_en_su_beat_y_no_en_la_retirada():
+    _, rangos = _rangos_x()
+    ap = guion_x.aparicion_del_sujeto(rangos, 30)
+    assert ap["ventana"][0] == rangos["caja"][0]
+    # sin beat `caja` se conserva la entrada de la retirada
+    assert guion_x.aparicion_del_sujeto({"salida": (271, 360)}, 30)["ventana"][0] == 271
+
+
+def _planes(n_estados=12, n_poses=9):
+    # `objetivo` es un número: la aritmética del recorrido es la misma que con Vector.
+    plano = lambda d: {"objetivo": d, "dist": d, "radio": 1.0}      # noqa: E731
+    return {"plan_camara": {"sitio": plano(1.0), "caja": plano(6.0),
+                            "estados_vina": [plano(4.0 - i * 0.2) for i in range(n_estados)],
+                            "poses": [plano(1.5 + (i % 3) * 0.5) for i in range(n_poses)]}}
+
+
+def test_el_recorrido_abre_en_el_sitio_y_nunca_pasa_de_la_caja():
+    formato, rangos = _rangos_x()
+    r = guion_x._recorrido(_planes(), rangos, formato.fps)
+    assert sorted(r) == list(range(1, rangos["convergencia"][1] + 1))
+    assert r[1][1] == pytest.approx(1.0, abs=0.05)
+    distancias = [v[1] for v in r.values()]
+    assert max(distancias) <= 6.0 + 1e-9 and min(distancias) >= 1.0 - 1e-9
+
+
+def test_el_recorrido_no_sacude_la_camara():
+    formato, rangos = _rangos_x()
+    r = guion_x._recorrido(_planes(), rangos, formato.fps)
+    saltos = [abs(r[f + 1][1] - r[f][1]) for f in range(1, len(r))]
+    assert max(saltos) < 0.3
+
+
+def test_sin_planes_de_seguimiento_manda_el_plano_unico():
+    formato, rangos = _rangos_x()
+    assert guion_x._recorrido({}, rangos, formato.fps) is None
+    assert guion_x._recorrido({"plan_camara": {"sitio": {}, "caja": {}}}, rangos, formato.fps) is None
+
+
+def test_suavizar_conserva_lo_constante_y_redondea_un_escalon():
+    assert guion_x._suavizar([2.0] * 20, 3.0) == pytest.approx([2.0] * 20)
+    escalon = guion_x._suavizar([0.0] * 20 + [1.0] * 20, 3.0)
+    assert all(a <= b + 1e-12 for a, b in zip(escalon, escalon[1:]))
+    assert 0.0 < escalon[20] < 1.0
