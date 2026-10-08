@@ -369,7 +369,12 @@ def main() -> int:
     beats = gui.resolver(guion.BEATS, paq, {"sujeto": ok}, formato, acta)
     rangos, n_frames = gui.repartir(beats, formato)
     if hasattr(guion, "ajustar_rangos"):
-        rangos = guion.ajustar_rangos(rangos, formato)
+        pide = inspect.signature(guion.ajustar_rangos).parameters
+        rangos = guion.ajustar_rangos(rangos, formato, **(
+            {"experimental": experimental} if "experimental" in pide else {}))
+        # Un guion puede alargar un beat (la vuelta final de Resultado): la escena
+        # dura lo que digan sus rangos, no el presupuesto inicial del formato.
+        n_frames = max(b for _a, b in rangos.values())
     frames = list(range(1, n_frames + 1))
     sc.frame_start, sc.frame_end = 1, n_frames
     render.configurar(formato, a.renderizador)
@@ -383,7 +388,12 @@ def main() -> int:
 
     medidas = medir(paq, rec, montado, guion, formato)
     if hasattr(guion, "ajustar_medidas"):
-        guion.ajustar_medidas(medidas, paq, rec, montado, formato)
+        # Como `anotaciones`: cada guion pide lo que necesita (la vuelta final de
+        # Resultado mide su recorrido con los rangos y con la cáscara translúcida).
+        pide = inspect.signature(guion.ajustar_medidas).parameters
+        guion.ajustar_medidas(medidas, paq, rec, montado, formato, **{
+            k: v for k, v in (("rangos", rangos), ("experimental", experimental))
+            if k in pide})
     ph = medidas["pose_heroe"]
     print(f"MEDIDO: D_gen={medidas['dist_general']:.2f} D_cerca={medidas['dist_primer_plano']:.2f} "
           f"pose az={medidas['azimut']:.0f} el={medidas['elevacion']:.0f} "

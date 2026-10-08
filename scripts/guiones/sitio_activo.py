@@ -4,7 +4,8 @@ Declara beats con PESO relativo, no segundos: el formato reparte. El mismo
 guion da 22.7 s en `biblioteca`, 3 s en bucle en `previsualizacion` (donde las
 pausas se descartan solas por no admitir etiquetas) y 12 s en vertical. A eso
 el montaje le suma la lectura: cuando todos los rótulos de una pausa están en
-pantalla, la imagen se congela de 2 a 3 s (ver `anotaciones`).
+pantalla, la imagen se congela de 2 a 3 s (ver `anotaciones`). Y termina con una
+vuelta completa alrededor del sitio (ver `ajustar_rangos` y `ajustar_medidas`).
 
 Lo que se muestra en el sitio lo pone el SUJETO, no este archivo. Hoy es el
 ligando cocristalizado; manana sera otro sin tocar nada de aqui.
@@ -29,20 +30,22 @@ SWEEP_GENERAL = 338.0     # los 22 que faltan para el 360 los cierra la aproxima
 BEATS = [
     Beat("general", peso=5.5, papel="establecer"),
     Beat("aproximacion", peso=3.5, papel="aproximar"),
-    Beat("pausa_hotspots", peso=4.0, papel="pausa"),
+    # Antes 4.0. Con las pausas de lectura (la imagen se congela cuando los
+    # rótulos están completos) ya no hace falta un beat largo para leerlos, y sin
+    # hotspots era una espera muerta: su tiempo pasa a la vuelta final.
+    Beat("pausa_hotspots", peso=3.0, papel="pausa"),
     # Se INTENTA con desplazamiento de entrada. Los 380 lo vetan por
     # `trayectoria_de_union`, asi que en la practica siempre cae al fundido.
     # Se deja declarado a proposito: es la prueba de que la prohibicion actua.
-    Beat("llegada_sujeto", peso=5.4, papel="pausa",
+    Beat("llegada_sujeto", peso=5.2, papel="pausa",
          permisos=("trayectoria_de_union",), alternativa="llegada_por_fundido",
          requiere="sujeto"),
-    # Antes 4.5. Se le quita casi un segundo y se le da a la pausa anterior.
-    # Motivo: las etiquetas ancladas NO pueden sobrevivir a este plano —se
-    # orientan una vez por pausa y con la camara orbitando se ladearian, que es
-    # el fallo original de todo este montaje—, asi que cada segundo de mas aqui
-    # es un segundo sin texto. Las lineas de contacto si siguen: son geometria,
-    # no se ladean, y hacen de memoria visual de lo que se acaba de explicar.
-    Beat("exploracion", peso=3.8, papel="explorar"),
+    # La vuelta final alrededor del sitio, sin rótulos: las etiquetas ancladas no
+    # sobreviven a una cámara que orbita (se ladearían). Las líneas de contacto sí
+    # siguen: son geometría y hacen de memoria de lo que se acaba de leer. Antes
+    # 3.8 (y antes aún 4.5): era un arco corto de 30° que con `ss` y el vaivén de
+    # distancia se leía como una oscilación lenta.
+    Beat("exploracion", peso=5.0, papel="explorar"),
     Beat("reposo", peso=0.5, papel="reposo", minimo_fotogramas=2),
 ]
 
@@ -60,6 +63,167 @@ PISO_FANTASMA = 0.12
 #: queda opaco. La banda es ancha a proposito; la silueta entra y sale de a
 #: poco en vez de recortarse contra el bolsillo.
 FANTASMA_CERCA, FANTASMA_LEJOS = 0.78, 0.995
+
+#: Lo que se ve el sitio vacío antes de que aparezca el sujeto, si no hay
+#: hotspots que rotular: medio segundo. Era el beat entero (2,1 s en vertical).
+SITIO_VACIO_S = 0.5
+
+#: La vuelta final: un giro completo alrededor del sitio, a velocidad constante
+#: (sólo acelera y frena en los `ARRANQUE_GIRO` extremos), a la distancia y la
+#: altura del primer plano, sin vaivén. Dura al menos VUELTA / VELOCIDAD_VUELTA
+#: segundos (el beat se alarga si hace falta, salvo en la vista de CPU de 3 s), y
+#: nunca gira más deprisa que `VELOCIDAD_MAXIMA`: si el beat es más corto, la
+#: vuelta es parcial.
+VUELTA_FINAL = 360.0
+VELOCIDAD_VUELTA, VELOCIDAD_MAXIMA = 100.0, 140.0      # grados por segundo
+ARRANQUE_GIRO = 0.15
+#: Diafragma de la vuelta (con y sin el look v4): uno, sin ir y volver.
+DIAFRAGMA_VUELTA, DIAFRAGMA_VUELTA_V4 = 3.2, 4.8
+
+
+def velocidad_constante(u: float, borde: float = ARRANQUE_GIRO) -> float:
+    """De 0 a 1 a velocidad constante; sólo acelera y frena en los `borde` extremos.
+
+    Perfil trapezoidal de velocidad. Con `ss` un giro va despacio al principio y al
+    final, y en un plano corto casi no llega a coger velocidad: se lee como un
+    vaivén. Los bordes evitan el tirón al arrancar desde una pausa y al parar.
+    (Vive aquí y no en `nucleo/horneado.py` a propósito: ese archivo entra en la
+    huella del cierre de marca, y tocarlo obliga a volver a rendirlo en cada equipo.)
+    """
+    u = min(1.0, max(0.0, u))
+    b = min(0.5, max(1e-6, borde))
+    v = 1.0 / (1.0 - b)                  # velocidad de crucero
+    if u < b:
+        return v * u * u / (2 * b)
+    if u > 1.0 - b:
+        return 1.0 - v * (1.0 - u) ** 2 / (2 * b)
+    return v * (u - b / 2)
+
+
+def ajustar_rangos(rangos, formato, experimental: bool = True):
+    """Alarga la vuelta final hasta que quepa entera a `VELOCIDAD_VUELTA`.
+
+    Sólo con la cáscara translúcida (`experimental`, el look v4): sin ella una
+    vuelta completa pasa por detrás de las cintas y se queda el arco medido. Y
+    nunca en un formato de 3 s o menos (la vista de CPU, cuyo límite es de render)
+    ni en un bucle. Los fotogramas añadidos van al final: nada anterior se mueve.
+    """
+    if (formato.bucle or not experimental or formato.segundos <= 3.0
+            or "exploracion" not in rangos):
+        return rangos
+    a, b = rangos["exploracion"]
+    falta = math.ceil(VUELTA_FINAL / VELOCIDAD_VUELTA * formato.fps) - (b - a + 1)
+    if falta <= 0:
+        return rangos
+    nuevos = {}
+    for clave, (i, j) in rangos.items():
+        if i > b:
+            nuevos[clave] = (i + falta, j + falta)
+        elif clave == "exploracion":
+            nuevos[clave] = (i, j + falta)
+        else:
+            nuevos[clave] = (i, j)
+    return nuevos
+
+
+def _visible_con_fantasma(dianas, desde, K, medidas, rec) -> float:
+    """Fracción de dianas que se ven desde `desde` con la cáscara translúcida puesta.
+
+    `oclusion.visibilidad` no ve el shader: para ella la cinta delante del ligando
+    tapa aunque en el render sea un 12 % opaca. Aquí un golpe en la CINTA dentro
+    del cilindro del portal (máscara ≥ 0.5) no tapa; las varillas, el ligando y
+    todo lo demás sí (no llevan portal).
+    """
+    import bpy
+    from nucleo.oclusion import margen_para
+
+    sc = bpy.context.scene
+    dg = bpy.context.evaluated_depsgraph_get()
+    portal = _portal_fantasma(K, desde, (K - desde).length, 1.0, medidas)
+    eje = Vector(portal["dir"])
+    cinta = rec.mat_cartoon.name if rec.mat_cartoon else None
+    m = margen_para(dianas)
+
+    def translucida(obj, indice, punto) -> bool:
+        if cinta is None or obj is None:
+            return False
+        try:
+            malla = obj.evaluated_get(dg).data
+            material = malla.materials[malla.polygons[indice].material_index]
+        except (AttributeError, IndexError, TypeError):
+            return False
+        if material is None or material.name != cinta:
+            return False
+        rel = punto - desde
+        t = rel.dot(eje)
+        radial = (rel - eje * t).length
+
+        def rampa(x, lleno, nada):
+            return 1.0 if x <= lleno else 0.0 if x >= nada else (nada - x) / (nada - lleno)
+        return rampa(radial, portal["r0"], portal["r1"]) * rampa(t, portal["t1"], portal["t2"]) >= 0.5
+
+    libres = 0
+    for p in dianas:
+        v = p - desde
+        L = v.length
+        if L < 1e-6:
+            continue
+        d = v / L
+        origen, restante, tapado = desde.copy(), L * m, False
+        for _ in range(16):
+            golpe, donde, _n, indice, obj, _mm = sc.ray_cast(dg, origen, d, distance=restante)
+            if not golpe:
+                break
+            if not translucida(obj, indice, donde):
+                tapado = True
+                break
+            avance = (donde - origen).length + 1e-4
+            origen, restante = donde + d * 1e-4, restante - avance
+            if restante <= 0:
+                break
+        libres += 0 if tapado else 1
+    return libres / max(len(dianas), 1)
+
+
+def ajustar_medidas(medidas, paq, rec, montado, formato, rangos=None, experimental=False):
+    """La vuelta final: qué se recorre, a qué velocidad, y si deja ver el sujeto.
+
+    Con el look v4 (`experimental`) es una vuelta completa a la distancia y la
+    altura del primer plano, con la cáscara translúcida puesta todo el giro (es
+    la que deja ver el ligando a través de las cintas que pasan por delante), y
+    su visibilidad se mide con esa cáscara (`_visible_con_fantasma`). Sin él se
+    conserva el arco que midió `maestro.medir`. En los dos casos, sin vaivén:
+    velocidad constante, distancia constante y un solo diafragma.
+    """
+    if formato.bucle or not rangos or "exploracion" not in rangos:
+        return
+    a, b = rangos["exploracion"]
+    segundos = (b - a + 1) / formato.fps
+    antes = dict(medidas.get("arco") or {})
+    if not experimental:
+        medidas["arco"] = dict(antes, hump=0.0, perfil="velocidad_constante",
+                               fantasma=False, segundos=round(segundos, 3))
+        return
+    signo = 1.0 if (antes.get("span") or -1.0) > 0 else -1.0
+    span = signo * min(VUELTA_FINAL, VELOCIDAD_MAXIMA * segundos)
+    el = medidas.get("elevacion", EL_PRIMER_PLANO)
+    arco = {"span": span, "el_fin": el, "rampa": ARRANQUE_GIRO, "hump": 0.0,
+            "perfil": "velocidad_constante", "fantasma": True,
+            "segundos": round(segundos, 3),
+            "grados_por_segundo": round(abs(span) / segundos, 1),
+            "arco_medido_antes": {k: antes.get(k) for k in ("span", "minimo", "media")}}
+    dianas = list(montado.dianas)
+    if dianas:
+        K, D0 = medidas["pivote"], medidas["dist_primer_plano"]
+        az0 = medidas["azimut"] - SWEEP_GENERAL - 22.0
+        vis = [_visible_con_fantasma(dianas, encuadre.posicion(K, az0 + span * i / 23, el, D0),
+                                     K, medidas, rec) for i in range(24)]
+        arco.update(minimo=round(min(vis), 4), media=round(sum(vis) / len(vis), 4),
+                    nota="visibilidad del sujeto con la cascara translucida puesta")
+    else:
+        arco.update(minimo=None, media=None,
+                    nota="sin sujeto: la oclusion de la vuelta no se mide")
+    medidas["arco"] = arco
 
 
 def _portal_fantasma(K, pos, distancia: float, fuerza: float, medidas) -> dict:
@@ -151,47 +315,37 @@ def estados(medidas, rangos, n_frames, formato, experimental=False):
             cn = (0.0, 0.05) if experimental else diso_cerca
             fantasma = 1.0
         elif hay("exploracion") and f <= fin("exploracion"):
+            # La vuelta final: velocidad constante (acelera y frena sólo en los
+            # extremos), misma distancia y un solo cambio de diafragma al arrancar.
+            # Antes: `ss` sobre un arco corto, un vaivén de distancia de ±12 %, una
+            # «micro-respiración» de 7,3 ciclos por plano y un diafragma que iba y
+            # volvía; en los 2 s del vertical todo eso se leía como oscilación.
             a, b = rangos["exploracion"]
             w = (f - a + 1) / (b - a + 1)
-            s = ss(w)
-            az = (A0 - SWEEP_GENERAL - 22.0) + arco["span"] * s
-            el = EL_CERCA + (arco["el_fin"] - EL_CERCA) \
-                * ss(min(w / arco["rampa"], 1.0)) + arco["hump"] * math.sin(math.pi * w)
-            D = D0 * (1.0 + 0.07 * s) + D0 * 0.12 * math.sin(math.pi * w)
-            # Micro-respiracion: el horneado es matematicamente exacto y el ojo
-            # lo lee como "CG". Dos senos incomensurables (7.3 y 4.1 vueltas por
-            # plano) dan una deriva de +-0.3% que no se percibe como oscilacion
-            # pero quita la rigidez. No toca geometria, tiempos ni encuadre.
-            D *= 1.0 + 0.003 * (math.sin(w * 7.3 * math.tau)
-                                + 0.6 * math.sin(w * 4.1 * math.tau + 1.7))
-            T, L, grad = K.copy(), LENTE_PRIMER_PLANO, grad_cerca
+            az = (A0 - SWEEP_GENERAL - 22.0) + arco["span"] * velocidad_constante(w, ARRANQUE_GIRO)
+            el = EL_CERCA + (arco["el_fin"] - EL_CERCA) * ss(min(w / arco["rampa"], 1.0))
+            D, T, L, grad = D0, K.copy(), LENTE_PRIMER_PLANO, grad_cerca
             if experimental:
-                if w < 0.18:
-                    fs = 7.0 + (4.8 - 7.0) * ss(w / 0.18)
-                elif w < 0.82:
-                    fs = 4.8
-                else:
-                    fs = 4.8 + (7.0 - 4.8) * ss((w - 0.82) / 0.18)
-                # El receptor recupera opacidad durante el primer 20% de la
-                # orbita final: el fantasma se apaga con el mismo suavizado.
-                h = ss(min(w / 0.20, 1.0))
-                fantasma = 1.0 - h
+                fs = 7.0 + (DIAFRAGMA_VUELTA_V4 - 7.0) * ss(min(w / 0.18, 1.0))
+                # Con la vuelta completa la cáscara translúcida sigue puesta: es la
+                # que deja ver el ligando a través de las cintas que pasan delante.
+                # Con el arco medido de antes, el receptor recupera opacidad.
+                fantasma = 1.0 if arco.get("fantasma") else 1.0 - ss(min(w / 0.20, 1.0))
                 cn = (0.0, 0.05)
             else:
-                if w < 0.15:
-                    fs = 22.0 + (3.2 - 22.0) * ss(w / 0.15)
-                elif w < 0.85:
-                    fs = 3.2
-                else:
-                    fs = 3.2 + (8.0 - 3.2) * ss((w - 0.85) / 0.15)
+                fs = 22.0 + (DIAFRAGMA_VUELTA - 22.0) * ss(min(w / 0.15, 1.0))
                 h = ss(min(w / 0.2, 1.0))
                 cn = (diso_cerca[0] * (1 + 0.8 * h),
                       diso_cerca[1] * (1 + 0.8 * h))
         else:
+            # El reposo: donde acabó la vuelta, con lo mismo que tenía al acabar.
             az = (A0 - SWEEP_GENERAL - 22.0) + (arco["span"] if hay("exploracion") else 0.0)
             el = arco["el_fin"] if hay("exploracion") else EL_CERCA
-            D, T = D0 * 1.07, K.copy()
-            L, fs, grad = LENTE_PRIMER_PLANO, 8.0, grad_cerca
+            D, T = D0, K.copy()
+            L, grad = LENTE_PRIMER_PLANO, grad_cerca
+            fs = DIAFRAGMA_VUELTA_V4 if experimental else DIAFRAGMA_VUELTA
+            if experimental:
+                fantasma = 1.0 if arco.get("fantasma") else 0.0
             cn = (0.0, 0.05) if experimental else (diso_cerca[0] * 1.8, diso_cerca[1] * 1.8)
 
         if not formato.profundidad_de_campo:
@@ -254,7 +408,7 @@ def anotaciones(rangos, formato, fps, n_sujeto: int = 1, n_hotspots: int = 3):
     al congelado: se omiten (`omitir_hasta`) y la lectura la da la pausa.
 
     Sin rótulos de hotspot, la pausa de cámara es una imagen fija —el sitio, sin
-    nada que aparezca—: se rinde UN fotograma y se repite lo mismo que duraba.
+    nada que aparezca—: se rinde UN fotograma y se ve `SITIO_VACIO_S`.
     """
     plan = {"hotspots": [], "sujeto": [], "pausas": []}
     if not formato.etiquetas_3d:
@@ -272,8 +426,11 @@ def anotaciones(rangos, formato, fps, n_sujeto: int = 1, n_hotspots: int = 3):
             plan["pausas"].append({"en": completo, "tipo": "lectura",
                                    "omitir_hasta": sale - 1 if sale - 1 > completo else None})
         else:
+            # El sitio vacío antes de que aparezca el sujeto: un solo render, y
+            # medio segundo (era el beat entero, 2,1 s en vertical).
             plan["pausas"].append({"en": a, "tipo": "imagen_fija",
-                                   "segundos": (b - a + 1) / fps, "omitir_hasta": b})
+                                   "segundos": min(SITIO_VACIO_S, (b - a + 1) / fps),
+                                   "omitir_hasta": b})
 
     clave = "llegada_sujeto" if "llegada_sujeto" in rangos else "llegada_por_fundido"
     if clave in rangos and n_sujeto > 0:

@@ -61,14 +61,14 @@ def test_con_seis_rotulos_la_imagen_se_congela_tres_segundos():
     assert lectura["omitidos"][1] == plan["sujeto"][0]["fundido"][1][0] - 1
 
 
-def test_sin_hotspots_la_pausa_de_camara_se_rinde_una_vez_y_dura_lo_mismo():
+def test_sin_hotspots_el_sitio_vacio_se_ve_medio_segundo_y_se_rinde_una_vez():
     plan = _plan(n_sujeto=6, n_hotspots=0)
     a, b = RANGOS["pausa_hotspots"]
     assert plan["hotspots"] == []
     fija = next(p for p in plan["pausas"] if p["tipo"] == "imagen_fija")
     assert fija["en"] == a and fija["omitir_hasta"] == b
     m = _montaje(plan, {plan["sujeto"][0]["colocar_en"]: ["x"]})
-    assert m["fuentes"].count(a) == b - a + 1                            # misma duración
+    assert m["fuentes"].count(a) == 15                                   # 0,5 s a 30 fps
     assert not any(a < f <= b for f in m["fuentes"])                     # un solo render
 
 
@@ -87,7 +87,8 @@ def test_el_recorrido_del_receptor_sin_sujeto_no_rinde_dos_veces_la_misma_imagen
     fijas = [p for p in plan["pausas"] if p["tipo"] == "imagen_fija"]
     assert [p["en"] for p in fijas] == [RANGOS["pausa_hotspots"][0], RANGOS["llegada_por_fundido"][0]]
     m = _montaje(plan, {})
-    assert len(m["fuentes"]) == 360                                      # el vídeo dura lo mismo
+    # El sitio vacío medio segundo; el beat del sujeto (vacío) dura lo mismo, un render.
+    assert len(m["fuentes"]) == 360 - (206 - 144 + 1) + 15
     assert m["fotogramas_render_unicos"] == 360 - (206 - 144) - (292 - 207)
 
 
@@ -104,3 +105,42 @@ def test_sin_etiquetas_3d_no_hay_rotulos_ni_pausas():
     formato = replace(fmt.cargar("social_vertical"), etiquetas_3d=False)
     plan = sitio_activo.anotaciones(RANGOS, formato, formato.fps, n_sujeto=6, n_hotspots=3)
     assert plan == {"hotspots": [], "sujeto": [], "pausas": []}
+
+
+def _rangos_reales(formato):
+    """Los beats del guion repartidos por el formato (la llegada, ya degradada a fundido)."""
+    from variables import guion as gui
+    from variables.guion import Beat
+    beats = [Beat("llegada_por_fundido", b.peso, b.papel) if b.id == "llegada_sujeto" else b
+             for b in sitio_activo.BEATS]
+    return gui.repartir(beats, formato)[0]
+
+
+def test_la_vuelta_final_se_alarga_hasta_caber_entera_a_su_velocidad():
+    formato = fmt.cargar("social_vertical")
+    rangos = _rangos_reales(formato)
+    nuevos = sitio_activo.ajustar_rangos(rangos, formato)
+    a, b = nuevos["exploracion"]
+    segundos = (b - a + 1) / formato.fps
+    assert segundos >= sitio_activo.VUELTA_FINAL / sitio_activo.VELOCIDAD_VUELTA
+    assert {k: v for k, v in nuevos.items() if k not in ("exploracion", "reposo")} ==         {k: v for k, v in rangos.items() if k not in ("exploracion", "reposo")}
+    assert nuevos["reposo"][0] == b + 1 and nuevos["reposo"][1] - nuevos["reposo"][0] ==         rangos["reposo"][1] - rangos["reposo"][0]
+
+
+def test_la_vuelta_no_se_alarga_en_cpu_ni_sin_la_cascara_ni_si_ya_cabe():
+    from dataclasses import replace
+    for formato, experimental in ((fmt.cargar("biblioteca"), True),
+                                  (fmt.cargar("social_vertical"), False),
+                                  (replace(fmt.cargar("social_vertical"), segundos=3.0), True)):
+        rangos = _rangos_reales(formato)
+        assert sitio_activo.ajustar_rangos(rangos, formato, experimental=experimental) == rangos
+
+
+def test_la_vuelta_va_a_velocidad_constante_y_solo_acelera_en_los_extremos():
+    vc = sitio_activo.velocidad_constante
+    assert vc(0.0) == 0.0 and abs(vc(1.0) - 1.0) < 1e-12 and vc(-1) == 0.0 and vc(2) == 1.0
+    pasos = [vc((i + 1) / 100) - vc(i / 100) for i in range(100)]
+    assert all(p >= 0 for p in pasos)                                   # nunca vuelve atrás
+    crucero = pasos[20:80]
+    assert max(crucero) - min(crucero) < 1e-9                           # sin vaivén
+    assert pasos[0] < crucero[0] and pasos[-1] < crucero[0]             # arranca y frena suave
