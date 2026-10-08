@@ -14,7 +14,8 @@ motor lo degrada y lo deja registrado en el acta del vídeo en vez de dibujarlo 
   propio motor aborta (la geometría de Molecular Nodes 4.x tiene otra escala).
 - La extensión **Molecular Nodes** (`bl_ext.blender_org.molecularnodes`; probada la 520.2.0), instalada desde Blender Extensions.
 - Windows y PowerShell: el lanzador `scripts/correr_caso.ps1` orquesta Blender en varias pasadas (escena, cierre de marca, codificación y sellado).
-- Python 3 con [Pillow](https://python-pillow.org/) (`-Python`): el contraste de la capa de rótulos y el sellado del MP4 corren fuera de Blender.
+- Python 3 con [Pillow](https://python-pillow.org/) (`-Python`): el contraste de la capa de rótulos, el sellado del MP4 y el lanzador de fotos
+  (`scripts/correr_foto.py`) corren fuera de Blender.
 
 ## Uso
 
@@ -28,13 +29,37 @@ scripts\correr_caso.ps1 -Pdb 1HSG -Sufijo prueba -Carpeta C:\ruta\de\salida `
 ```
 
 Formatos: `previsualizacion` (1:1, 720 px), `social_vertical` (9:16, 1080×1920) y `biblioteca` (16:9, 1080p). Renderizadores: `gpu` (EEVEE) y `cpu` (Cycles; la escena se
-limita a tres segundos).
+limita a tres segundos). MolDesign sólo ofrece el vídeo con GPU; con CPU ofrece fotos (ver «Fotos»).
 
 Variables de entorno que reconoce: `MOLCY_SCENES_DIR`, `MOLCY_CASES_DIR`, `MOLCY_OUTPUT_DIR`, `MOLCY_BLENDER`, `MOLCY_ART_TEMPLATE`, `MOLCY_BRAND_CACHE_DIR` y
 `MOLCY_CPU_THREADS`. Ninguna ruta de una máquina concreta está escrita en el código.
 
 La arquitectura (un maestro, módulos atómicos para guion, sujeto y formato) se describe en el código de `scripts/`: cada variable vive en su fichero y el maestro los
 descubre solos.
+
+## Fotos
+
+Una foto es UN fotograma de la escena, rendido con **Cycles** a la resolución que se pida, en CPU o en GPU (CUDA, OptiX, HIP, oneAPI o Metal: el primero que Cycles
+encuentre). Con el mismo denoiser (OpenImageDenoise), la misma semilla y el mismo muestreo, la foto no depende del equipo: medido en 4FK3 a 1080×1920, la de CPU y la
+de GPU difieren 0,03/255 de media y 6/255 como máximo. Sin desenfoque de movimiento (una foto es un instante quieto) y sin sello quemado.
+
+```powershell
+python scripts\correr_foto.py preparar --pdb 4FK3 --guion sitio_activo --sujeto pose_evaluada `
+    --formato social_vertical --sufijo prueba --carpeta C:\ruta\de\salida --blender $env:MOLCY_BLENDER --dispositivo gpu
+python scripts\correr_foto.py tomar --escena C:\ruta\de\salida\escena_fotos_prueba.json --fotograma 253 `
+    --ancho 2160 --alto 3840 --muestras 128 --nombre foto_1 --carpeta C:\ruta\de\salida --blender $env:MOLCY_BLENDER --dispositivo gpu
+```
+
+- `preparar` construye la escena una sola vez (`maestro.py --fotos`: sin el límite de tres segundos de la CPU, que es del vídeo), guarda el `.blend` con todo
+  horneado y `escena_fotos_*.json`, y rinde una miniatura de cada **momento sugerido** (`tomas_*.json` y `tomas_*/`).
+- Los momentos sugeridos no son una lista a mano (`variables/momentos.py`): cada pausa del montaje (un grupo de etiquetas acaba de entrar entero, o la cámara se
+  detiene sobre el sitio), el plano general con el título y la mitad de cada beat de recorrido sin pausa propia. Fuera de ellos vale cualquier fotograma fuente.
+- `tomar` abre el `.blend` (`foto.py`), rinde la escena y, si en ese instante hay texto, la capa de rótulos aparte, y las compone con el mismo halo y placa que el
+  vídeo (`salida/foto_final.py`). Deja `<nombre>.png` (300 ppp) y `<nombre>.json`, el acta: fotograma, beat, momento, ajustes reales de Cycles, SHA-256 de la escena,
+  del `.blend` y del PNG, y qué hay en cada esquina de la capa (`esquinas`, alfa máximo) para que una marca no tape una etiqueta.
+- El lanzador es Python con Pillow, fuera de Blender; cada Blender que lanza se comprueba por su código de salida y su marca (`FOTOS_ESCENA_OK`, `FOTO_LISTA`).
+
+La marca de MolDesign en una foto no la pone el motor: la pone MolDesign sobre el PNG final.
 
 ## Pruebas
 

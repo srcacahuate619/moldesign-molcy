@@ -34,7 +34,7 @@ from nucleo.rutas import ESCENAS, PLANTILLA_ARTE, carpeta_de_caso  # noqa: E402
 from salida import control, firmas, procedencia, render         # noqa: E402
 from variables import formato as fmt                            # noqa: E402
 from variables import guion as gui                              # noqa: E402
-from variables import controles, pausas, rotulos, sujeto        # noqa: E402
+from variables import controles, momentos, pausas, rotulos, sujeto  # noqa: E402
 
 
 # ── inventario ───────────────────────────────────────────────────────────
@@ -55,6 +55,21 @@ def listar(paq=None) -> None:
             marca = "si " if info["disponible"] else "NO "
             print(f"  [{marca}] {n:<22} {info['razon']}")
     print()
+
+
+def limpio(v):
+    """Un valor de Blender (Vector, float largo...) como JSON corto y estable."""
+    if isinstance(v, Vector):
+        return [round(x, 4) for x in v]
+    if isinstance(v, (int, str, bool)) or v is None:
+        return v
+    if isinstance(v, float):
+        return round(v, 4)
+    if isinstance(v, (list, tuple)):
+        return [limpio(x) for x in v]
+    if isinstance(v, dict):
+        return {k: limpio(x) for k, x in v.items()}
+    return str(v)
 
 
 # ── carpeta del caso ─────────────────────────────────────────────────────
@@ -141,6 +156,66 @@ def vista_previa(pos: float, salida: str, formato, rangos, fuentes,
     bpy.ops.render.render(write_still=True)
     print(f"VISTA_PREVIA: {salida}.png cuadro={f}/{n_frames} beat={beat} "
           f"segundos={time.time() - t:.2f}", flush=True)
+    return 0
+
+
+def _sha256(ruta: Path) -> str:
+    h = hashlib.sha256()
+    with open(ruta, "rb") as fh:
+        for bloque in iter(lambda: fh.read(1 << 20), b""):
+            h.update(bloque)
+    return h.hexdigest()
+
+
+def escena_para_fotos(paq, guion, formato, mod_sujeto, ok, razon, destino: Path,
+                      sufijo: str, t0: float, *, beats, rangos, n_frames, montaje,
+                      momentos_sugeridos, capa_titulo, etiquetas_lectura, omitidas,
+                      medidas, informe, acta, rec, montado, forzado, experimental,
+                      ajustes, resueltos) -> int:
+    """Guarda la escena construida para que `foto.py` rinda de ella cualquier fotograma.
+
+    El `.blend` lleva todo lo horneado (cámara, fundidos, rótulos), así que un
+    fotograma se rinde abriéndolo, sin volver a montar la escena. El acta de la
+    escena dice qué hay en él: los momentos sugeridos, qué objetos van en la capa
+    de rótulos y en qué ventanas, y las cajas de las etiquetas para su placa.
+    Sin sello quemado: la marca de una foto la pone MolDesign sobre el PNG final.
+    """
+    sc = bpy.context.scene
+    sc.render.use_stamp = False
+    sc.frame_set(1)
+    blend = destino / "blender" / f"{paq.pdb_id}_{formato.nombre}_fotos{sufijo}.blend"
+    bpy.ops.wm.save_as_mainfile(filepath=str(blend))
+    escena = {
+        "schema": "molcy.fotos.escena/1",
+        "pdb_id": paq.pdb_id, "guion": guion.NOMBRE, "formato": formato.resumen(),
+        "sujeto": {"id": mod_sujeto.ID, "disponible": ok, "razon": razon},
+        "fotogramas_fuente": n_frames, "fps": formato.fps,
+        "beats": {k: list(v) for k, v in rangos.items()},
+        "papeles": {b.id: b.papel for b in beats},
+        "momentos": momentos_sugeridos,
+        "pausas": montaje["pausas"],
+        "capa": ({"objetos": list(capa_titulo["objetos"]),
+                  "ventanas": [list(v) for v in capa_titulo.get("ventanas") or [capa_titulo["ventana"]]]}
+                 if capa_titulo else None),
+        "etiquetas_lectura": etiquetas_lectura,
+        "etiquetas_omitidas": omitidas,
+        "medidas": limpio({k: v for k, v in medidas.items() if k != "arco"}),
+        "control_de_calidad": informe.como_lista(),
+        "forzado": bool(forzado),
+        "decisiones_del_contrato": acta.decisiones,
+        "presentacion": {"titulo": rotulos.titulo_pantalla(paq.pdb_id, paq.nombre, paq.resolucion)[0],
+                         "experimental_look": bool(experimental)},
+        "ajustes": ({"entrada": ajustes, "resueltos": resueltos} if resueltos else None),
+        "notas": rec.notas + montado.notas,
+        "procedencia_paquete": paq.procedencia,
+        "blend": {"nombre": blend.name, "sha256": _sha256(blend)},
+        "construido_s": round(time.time() - t0, 1),
+    }
+    ruta = destino / f"escena_fotos{sufijo}.json"
+    ruta.write_text(json.dumps(escena, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("FOTOS_ESCENA_OK " + json.dumps(
+        {"escena": ruta.name, "blend": blend.name, "fotogramas": n_frames,
+         "momentos": len(momentos_sugeridos)}, ensure_ascii=False), flush=True)
     return 0
 
 
@@ -293,6 +368,10 @@ def main() -> int:
                          "y sale: sin .blend, sin acta y sin tocar el caso")
     ap.add_argument("--salida-vista", default="",
                     help="ruta del PNG de la vista previa, sin extension")
+    ap.add_argument("--fotos", action="store_true",
+                    help="construye la escena para fotos (sin acortarla en CPU), "
+                         "guarda el .blend y escena_fotos_*.json con los momentos "
+                         "sugeridos, y sale sin rendir: las fotos las rinde foto.py")
     a = ap.parse_args(argv)
 
     if a.listar:
@@ -310,9 +389,14 @@ def main() -> int:
     # formato y extras quedan exactamente como en produccion.
     ajustes = controles.leer(a.ajustes) if a.ajustes else {}
     formato, extras, resueltos = controles.aplicar(formato, ajustes)
-    formato = fmt.para_dispositivo(formato, a.renderizador)
+    if not a.fotos:
+        # El límite de la CPU es del VÍDEO. Una foto es un fotograma: la escena se
+        # construye entera en cualquier equipo y el dispositivo sólo cambia el tiempo.
+        formato = fmt.para_dispositivo(formato, a.renderizador)
     experimental = a.experimental_look and extras["look_v4"]
     vista = a.vista_previa is not None
+    if vista and a.fotos:
+        ap.error("--vista-previa y --fotos no se combinan")
     guion = gui.cargar(a.guion)
     # El guion puede fijar su sujeto: el de `x` es la busqueda de Montecarlo y
     # no negocia con `--sujeto`. La bandera manda solo si el guion no fija uno.
@@ -378,7 +462,9 @@ def main() -> int:
         n_frames = max(b for _a, b in rangos.values())
     frames = list(range(1, n_frames + 1))
     sc.frame_start, sc.frame_end = 1, n_frames
-    render.configurar(formato, a.renderizador)
+    # Las fotos se rinden siempre con Cycles (en CPU o en GPU): así una foto no
+    # depende del equipo que la hizo. `foto.py` fija el dispositivo al abrir el .blend.
+    render.configurar(formato, "cpu" if a.fotos else a.renderizador)
     if extras["exposicion"] is not None:
         sc.view_settings.exposure = extras["exposicion"]
     if resueltos:
@@ -653,6 +739,19 @@ def main() -> int:
     if vista:
         return vista_previa(a.vista_previa, a.salida_vista, formato, rangos,
                             montaje["fuentes"], capa_titulo)
+    if a.fotos:
+        return escena_para_fotos(
+            paq, guion, formato, mod_sujeto, ok, razon, destino, sufijo, t0,
+            beats=beats, rangos=rangos, n_frames=n_frames, montaje=montaje,
+            momentos_sugeridos=momentos.sugeridos(
+                rangos, montaje["pausas"], n_frames,
+                titulo=cfg_tit if proto is not None else None,
+                papeles={b.id: b.papel for b in beats},
+                rotulos_por_pose=(montado.extra or {}).get("rotulos_por_pose")),
+            capa_titulo=capa_titulo,
+            etiquetas_lectura=etiquetas_lectura, omitidas=omitidas, medidas=medidas,
+            informe=informe, acta=acta, rec=rec, montado=montado, forzado=a.forzar,
+            experimental=experimental, ajustes=ajustes, resueltos=resueltos)
 
     # Reutilizar lo que ya está rendido: un fotograma cuyo estado (todas sus curvas)
     # es el de otro ya rendido da la misma imagen. La escena y la capa de rótulos por
@@ -685,19 +784,6 @@ def main() -> int:
     blend = destino / "blender" / f"{paq.pdb_id}_{formato.nombre}{sufijo}.blend"
     bpy.ops.wm.save_as_mainfile(filepath=str(blend))
     print(f"BLEND: {blend}")
-
-    def limpio(v):
-        if isinstance(v, Vector):
-            return [round(x, 4) for x in v]
-        if isinstance(v, (int, str, bool)) or v is None:
-            return v
-        if isinstance(v, float):
-            return round(v, 4)
-        if isinstance(v, (list, tuple)):
-            return [limpio(x) for x in v]
-        if isinstance(v, dict):
-            return {k: limpio(x) for k, x in v.items()}
-        return str(v)
 
     registro = {
         "pdb_id": paq.pdb_id, "guion": guion.NOMBRE, "formato": formato.resumen(),

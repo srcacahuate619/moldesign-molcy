@@ -31,7 +31,10 @@ def reforzar(capa: Image.Image, cajas=()) -> Image.Image:
     """La capa con halo y placas. `cajas` en píxeles (x0, y0, x1, y1)."""
     capa = capa.convert("RGBA")
     alfa = capa.getchannel("A")
-    lado = 3 if min(capa.size) < 1400 else 5                   # el halo, en píxeles (impar)
+    # El halo, en píxeles e impar, proporcional al cuadro: 3 hasta 1080 de lado
+    # corto (lo que mide el vídeo) y más en una foto de 1440 o 4K, donde 3 px se
+    # pierden. Antes era 3 o 5 con un corte en 1400.
+    lado = max(3, round(min(capa.size) * 3 / 1080)) | 1
     halo = alfa.filter(ImageFilter.MaxFilter(lado)).point(lambda v: round(v * HALO))
     fondo = Image.new("RGBA", capa.size, (*OSCURO, 0))
     fondo.putalpha(halo)
