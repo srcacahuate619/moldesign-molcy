@@ -53,6 +53,8 @@ rótulos— se repite durante la pausa (de 2 a 3 s en Resultado según cuántas 
 veces, y un tramo del guion que sería una imagen fija se rinde una sola vez. En el acta, `fotogramas` y `duracion_s` son los del vídeo (antes del cierre),
 `fotogramas_fuente` los del `.blend` y `fotogramas_render_unicos` los PNG que hay que rendir; `pausas` es el índice en segundos.
 
+Además, un fotograma cuyo estado es idéntico al de otro ya rendido no se vuelve a rendir (`salida/firmas.py`: la «firma» es el valor de todas las curvas horneadas en ese fotograma; con desenfoque de movimiento cuentan también sus vecinos). La escena y la capa de rótulos se comparan por separado: mientras las etiquetas entran sobre una cámara quieta la escena no cambia, y el texto de pantalla no cambia porque la cámara se mueva. `montaje.json` lleva los mapas `escena` y `capa` (fotograma → PNG ya rendido).
+
 Las etiquetas de un mismo instante se reparten juntas con restricciones duras (`variables/disposicion.py`): ningún texto se solapa con otro ni con el texto de
 pantalla, ni tapa el sujeto o una línea de interacción, y ninguna guía cruza otra. Si no caben, se achican y, como último recurso, se rotulan menos; el acta lo dice
 (`etiquetas_omitidas`). La capa de rótulos lleva un halo y una placa oscura detrás de cada etiqueta (`salida/contraste.py`, con Pillow). POLAR y APOLAR llevan el

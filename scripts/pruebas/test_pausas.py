@@ -1,7 +1,7 @@
 """El montaje de pausas: repetir un fotograma ya rendido, nunca rendirlo otra vez."""
 import pytest
 
-from variables.pausas import Congelado, indice, montar, segundos_de_lectura
+from variables.pausas import Congelado, indice, montar, representantes, segundos_de_lectura
 
 
 def test_sin_pausas_el_video_es_el_guion_tal_cual():
@@ -60,3 +60,51 @@ def test_la_lectura_dura_de_dos_a_tres_segundos_segun_cuantas_etiquetas():
 def test_el_indice_da_las_pausas_en_segundos_del_video():
     m = montar(100, 30, [Congelado(31, 1.0, etiquetas=("a", "b"))])
     assert indice(m, 30) == [{"inicio_s": 1.0, "fin_s": 2.0, "tipo": "lectura", "etiquetas": 2}]
+
+
+def _firma(estados):
+    """estados: {fotograma: valor}; fuera de la lista, un valor propio (todo cambia)."""
+    return lambda f: estados.get(f, ("propio", f))
+
+
+def test_un_tramo_quieto_se_rinde_una_vez():
+    estados = {f: "quieto" for f in range(10, 21)}
+    rep = representantes(range(1, 31), _firma(estados))
+    # Con estela, el primero y el último del tramo dependen de sus vecinos que se mueven.
+    assert rep == {f: 11 for f in range(12, 20)}
+
+
+def test_sin_estela_basta_con_que_el_estado_sea_igual():
+    estados = {f: "quieto" for f in range(10, 21)}
+    rep = representantes(range(1, 31), _firma(estados), vecinos=False)
+    assert rep == {f: 10 for f in range(11, 21)}
+
+
+def test_dos_tramos_con_el_mismo_estado_comparten_render_aunque_esten_lejos():
+    estados = {**{f: "A" for f in range(5, 9)}, **{f: "A" for f in range(40, 44)}}
+    rep = representantes(range(1, 50), _firma(estados), vecinos=False)
+    assert rep == {6: 5, 7: 5, 8: 5, 40: 5, 41: 5, 42: 5, 43: 5}
+
+
+def test_los_congelados_se_rinden_siempre_y_nada_cambia_si_todo_se_mueve():
+    estados = {f: "quieto" for f in range(10, 21)}
+    rep = representantes(range(1, 31), _firma(estados), vecinos=False, propios={12})
+    assert 12 not in rep and rep[13] == 10
+    assert representantes(range(1, 31), _firma({})) == {}
+
+
+def test_solo_se_reutiliza_lo_que_se_iba_a_rendir():
+    estados = {f: "quieto" for f in range(1, 31)}
+    rep = representantes([3, 7, 9], _firma(estados), vecinos=False)
+    assert rep == {7: 3, 9: 3}
+
+
+
+def test_un_fundido_de_entrada_empieza_en_cero_sin_destello():
+    # `horneado.curva` valía 1 en el primer fotograma del fundido: un destello.
+    from nucleo.fundido import curva
+    v = curva([(10, 16, 0, 1), (30, 36, 1, 0)], range(8, 40))
+    assert v[:3] == [0.0, 0.0, 0.0]                       # 8, 9 y el 10, donde empieza
+    assert all(a <= b for a, b in zip(v[2:9], v[3:9]))    # sube sin bajar
+    assert v[8] == 1.0 and v[22] == 1.0 and v[-1] == 0.0
+    assert curva([(1, 2, 1, 1)], range(1, 5)) == [1.0] * 4

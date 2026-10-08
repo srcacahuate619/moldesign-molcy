@@ -106,3 +106,29 @@ def indice(montaje: dict, fps: int) -> list[dict]:
              "fin_s": round(p["salida"][1] / fps, 3),
              "tipo": p["tipo"], "etiquetas": len(p["etiquetas"])}
             for p in montaje["pausas"]]
+
+
+def representantes(frames, firma, vecinos: bool = True, propios=()) -> dict:
+    """fotograma -> el fotograma ya rendido que se verá exactamente igual.
+
+    Todo lo que se mueve en estas escenas está horneado por fotograma, así que dos
+    fotogramas con la misma `firma` (los valores de todas sus curvas) dan la misma
+    imagen: EEVEE es determinista. Con desenfoque de movimiento (`vecinos`) el
+    render de `f` depende también de `f-1` y `f+1`, así que sólo se reutiliza un
+    fotograma QUIETO (los tres iguales). `propios` se rinden siempre (los que el
+    montaje congela, que van sin desenfoque). Devuelve sólo los que cambian.
+    """
+    vistos: dict = {}
+    out: dict = {}
+    for f in sorted(frames):
+        if f in propios:
+            continue
+        clave = firma(f)
+        if vecinos and not (firma(f - 1) == clave == firma(f + 1)):
+            continue
+        if clave in vistos:
+            out[f] = vistos[clave]
+        else:
+            vistos[clave] = f
+    return out
+

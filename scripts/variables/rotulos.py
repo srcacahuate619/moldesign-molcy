@@ -25,6 +25,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 from nucleo import horneado as H
+from nucleo.fundido import curva
 # El nombre del rotulo inferior vive en `titulos.py`, sin bpy, para poder
 # probarlo fuera de Blender. Se reexporta: el maestro lo llama desde aqui.
 from variables.titulos import NOMBRES_CURADOS, nombre_legible, titulo_pantalla  # noqa: F401
@@ -353,4 +354,4 @@ def hornear(rotulos, frames) -> None:
             if o is not None:
                 H.visible_en(o, frames, a, b)
         if r.fundido:
-            H.fundir(r.material, frames, H.curva(r.fundido, frames))
+            H.fundir(r.material, frames, curva(r.fundido, frames))

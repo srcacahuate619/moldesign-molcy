@@ -200,6 +200,7 @@ def pasada_titulo(destino: Path, nombre_objeto, ventana,
     sello = sc.render.use_stamp
     visible = {o.name: o.visible_camera for o in objetos}
     dof = cam.data.dof.use_dof if cam else False
+    estela = getattr(sc.render, "use_motion_blur", False)
     # Todo lo que se rinde y no es un rotulo. Antes sólo se apagaban las MALLAS, y
     # además con `hide_render`, que en el sujeto y en la caja está ANIMADO: la
     # animación se evalúa después de asignar la propiedad y gana, así que el
@@ -226,6 +227,11 @@ def pasada_titulo(destino: Path, nombre_objeto, ventana,
         sc.render.use_stamp = False     # el sello ya va quemado en el principal
         if cam:
             cam.data.dof.use_dof = False
+        # Sin estela: el texto de pantalla va pegado a la cámara (no tiene movimiento
+        # relativo) y una etiqueta anclada sólo se ve con la imagen quieta. Así la
+        # capa depende sólo del estado del texto y se puede reutilizar entre
+        # fotogramas (`salida/firmas.py`).
+        sc.render.use_motion_blur = False
         sc.render.image_settings.color_mode = "RGBA"
         for i, f in enumerate(frames):
             comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
@@ -256,6 +262,7 @@ def pasada_titulo(destino: Path, nombre_objeto, ventana,
         sc.render.use_stamp = sello
         if cam:
             cam.data.dof.use_dof = dof
+        sc.render.use_motion_blur = estela
         sc.render.image_settings.color_mode = color
     seg = time.time() - t0
     print(f"TITULO_LISTO {len(frames)} en {seg:.0f}s", flush=True)

@@ -28,9 +28,10 @@ import bpy                                                      # noqa: E402
 from mathutils import Vector                                    # noqa: E402
 
 from nucleo import arte, camara, encuadre, horneado as H, interacciones, oclusion, receptor  # noqa: E402
+from nucleo.fundido import curva                                # noqa: E402
 from nucleo.ciencia import Paquete                              # noqa: E402
 from nucleo.rutas import ESCENAS, PLANTILLA_ARTE, carpeta_de_caso  # noqa: E402
-from salida import control, procedencia, render                 # noqa: E402
+from salida import control, firmas, procedencia, render         # noqa: E402
 from variables import formato as fmt                            # noqa: E402
 from variables import guion as gui                              # noqa: E402
 from variables import controles, pausas, rotulos, sujeto        # noqa: E402
@@ -453,11 +454,11 @@ def main() -> int:
     # apariciones del receptor y del sujeto
     ap_h = guion.aparicion_de_hotspots(rangos, formato.fps)
     if rec.mat_hotspots and ap_h:
-        H.fundir(rec.mat_hotspots, frames, H.curva(ap_h["fundido"], frames))
+        H.fundir(rec.mat_hotspots, frames, curva(ap_h["fundido"], frames))
     ap_s = guion.aparicion_del_sujeto(rangos, formato.fps)
     if montado.objetos and ap_s:
         for m in montado.materiales:
-            H.fundir(m, frames, H.curva(ap_s["fundido"], frames))
+            H.fundir(m, frames, curva(ap_s["fundido"], frames))
         for o in montado.objetos:
             H.visible_en(o, frames, ap_s["ventana"][0], n_frames)
     ap_c = (guion.aparicion_de_contactos(rangos, formato.fps)
@@ -466,7 +467,7 @@ def main() -> int:
         for m in montado.materiales_secundarios:
             if hasattr(m, "surface_render_method"):
                 m.surface_render_method = "DITHERED"
-            H.fundir(m, frames, H.curva(ap_c["fundido"], frames))
+            H.fundir(m, frames, curva(ap_c["fundido"], frames))
         for o in montado.secundarios:
             H.visible_en(o, frames, ap_c["ventana"][0], n_frames)
     if hasattr(guion, "animar_sujeto") and montado.extra:
@@ -653,6 +654,33 @@ def main() -> int:
         return vista_previa(a.vista_previa, a.salida_vista, formato, rangos,
                             montaje["fuentes"], capa_titulo)
 
+    # Reutilizar lo que ya está rendido: un fotograma cuyo estado (todas sus curvas)
+    # es el de otro ya rendido da la misma imagen. La escena y la capa de rótulos por
+    # separado: mientras las etiquetas entran sobre una cámara quieta la escena no
+    # cambia, y el texto de pantalla no cambia porque la cámara se mueva.
+    fijos = {c.fuente for c in congelados}
+    ventanas_capa = (capa_titulo.get("ventanas") or [capa_titulo["ventana"]]) if capa_titulo else []
+    con_texto = [f for f in frames_render if any(v0 <= f <= v1 for v0, v1 in ventanas_capa)]
+    rep_escena, rep_capa = {}, {}
+    if firmas.hay_controladores():
+        print("REUTILIZA: no (hay controladores; la firma por curvas no los ve)")
+    else:
+        rotulos_capa = capa_titulo["objetos"] if capa_titulo else []
+        firma_escena = firmas.de_escena(rotulos_capa, n_frames)
+        rep_escena = pausas.representantes(frames_render, firma_escena.get,
+                                           vecinos=formato.desenfoque_movimiento, propios=fijos)
+        if capa_titulo:
+            anclados = {f: True for r in ancladas for f in range(r.ventana[0], r.ventana[1] + 1)}
+            firma_capa = firmas.de_capa(rotulos_capa, rig.camara, anclados, n_frames)
+            rep_capa = pausas.representantes(con_texto, firma_capa.get, vecinos=False)
+    escena_unicos = [f for f in frames_render if f not in rep_escena]
+    capa_unicos = [f for f in con_texto if f not in rep_capa]
+    montaje["fotogramas_render_unicos"] = len(escena_unicos)
+    montaje["escena"] = {str(f): r for f, r in rep_escena.items()}
+    montaje["capa"] = {str(f): r for f, r in rep_capa.items()}
+    print(f"REUTILIZA: escena {len(escena_unicos)} renders de {len(frames_render)}; "
+          f"capa {len(capa_unicos)} de {len(con_texto)}")
+
     sc.frame_set(1)
     blend = destino / "blender" / f"{paq.pdb_id}_{formato.nombre}{sufijo}.blend"
     bpy.ops.wm.save_as_mainfile(filepath=str(blend))
@@ -741,23 +769,21 @@ def main() -> int:
     escribir(acta_parcial)
     huella = huella_de_construccion(registro)
     carpeta_render = destino / f"render_{formato.nombre}{sufijo}"
-    info = render.secuencia(carpeta_render, frames_render, huella=huella,
-                            fijos={c.fuente for c in congelados})
-    # `codificar.py` monta el video siguiendo este mapa (fotograma de salida →
-    # PNG fuente): sin el, solo veria la secuencia rendida, sin pausas.
+    info = render.secuencia(carpeta_render, escena_unicos, huella=huella, fijos=fijos)
+    # `codificar.py` monta el video siguiendo estos mapas (fotograma de salida →
+    # fotograma fuente → PNG ya rendido de la escena y de la capa): sin ellos solo
+    # veria la secuencia rendida, sin pausas ni reutilizados.
     (carpeta_render / "montaje.json").write_text(
-        json.dumps({"fuentes": montaje["fuentes"]}), encoding="utf-8")
+        json.dumps({"fuentes": montaje["fuentes"], "escena": montaje["escena"],
+                    "capa": montaje["capa"]}), encoding="utf-8")
     registro["render"] = info
     if capa_titulo:
-        # Solo los fotogramas rendidos en los que algun texto existe: el resto
-        # de la capa seria transparente y costaba un render entero cada uno.
-        ventanas = capa_titulo.get("ventanas") or [capa_titulo["ventana"]]
-        con_texto = [f for f in frames_render
-                     if any(v0 <= f <= v1 for v0, v1 in ventanas)]
+        # Solo los fotogramas en los que algun texto existe (el resto de la capa
+        # seria transparente) y, de ellos, uno por estado distinto del texto.
         info_capa = render.pasada_titulo(
             destino / f"render_{formato.nombre}{sufijo}_titulo",
             capa_titulo.get("objetos", [capa_titulo.get("objeto")]), capa_titulo["ventana"],
-            fotogramas=con_texto)
+            fotogramas=capa_unicos)
         capa_titulo.update(info_capa)
         print(f"CAPA_TITULO: {info_capa['fotogramas']} fotogramas de titulo "
               f"con alfa; se componen por encima al codificar")

@@ -571,7 +571,8 @@ def rotulos_datos(rangos, formato, fps, montado):
 def animar_sujeto(rangos, fps, montado, frames):
     """Enseña el ligando y cada pose real sin inventar una trayectoria."""
     import bpy
-    from nucleo.horneado import curva, fundir, hornear, visible_en
+    from nucleo.fundido import curva
+    from nucleo.horneado import fundir, hornear, visible_en
     poses = (montado.extra or {}).get("poses") or []
     ventanas = ventanas_poses(rangos, len(poses))
     busqueda = rangos.get("busqueda")

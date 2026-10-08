@@ -123,8 +123,10 @@ def test_la_vuelta_final_se_alarga_hasta_caber_entera_a_su_velocidad():
     a, b = nuevos["exploracion"]
     segundos = (b - a + 1) / formato.fps
     assert segundos >= sitio_activo.VUELTA_FINAL / sitio_activo.VELOCIDAD_VUELTA
-    assert {k: v for k, v in nuevos.items() if k not in ("exploracion", "reposo")} ==         {k: v for k, v in rangos.items() if k not in ("exploracion", "reposo")}
-    assert nuevos["reposo"][0] == b + 1 and nuevos["reposo"][1] - nuevos["reposo"][0] ==         rangos["reposo"][1] - rangos["reposo"][0]
+    antes = {k: v for k, v in rangos.items() if k not in ("exploracion", "reposo")}
+    assert {k: v for k, v in nuevos.items() if k not in ("exploracion", "reposo")} == antes
+    assert nuevos["reposo"][0] == b + 1
+    assert nuevos["reposo"][1] - nuevos["reposo"][0] == rangos["reposo"][1] - rangos["reposo"][0]
 
 
 def test_la_vuelta_no_se_alarga_en_cpu_ni_sin_la_cascara_ni_si_ya_cabe():
