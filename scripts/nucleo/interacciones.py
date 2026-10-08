@@ -31,10 +31,20 @@ RADIO_A = 12.0
 #: Tamaño del rótulo de una interacción respecto al de los demás rótulos 3D (que se calibraron
 #: para una cámara más lejana): son dos líneas por interacción y hasta seis por pose.
 ESCALA_ROTULO = 0.36
+#: El rótulo del sujeto («Vina top-1») y el de un hotspot, en la misma escala: a 1.0 el del
+#: sujeto ocupaba en vertical medio ancho de cuadro y las interacciones caían encima.
+ESCALA_SUJETO = 0.50
+ESCALA_HOTSPOT = 0.40
 
 #: Colores de los rótulos, iguales a los de sus líneas (ámbar y turquesa); sólo en el render.
+#: El texto sólo emite (`rotulos.tintar`): así conserva el tono en vez de blanquearse.
 COLOR_POLAR = (1.0, 0.72, 0.20)
 COLOR_APOLAR = (0.20, 0.82, 0.84)
+#: Un hotspot no es una interacción: neutro, sin el color de ninguna clase.
+COLOR_HOTSPOT = (0.86, 0.89, 0.93)
+#: Emisión de las líneas punteadas. A 6.0 y 4.5 (antes) AgX las llevaba al blanco y la
+#: polar y la apolar dejaban de distinguirse entre sí y de sus rótulos.
+EMISION_LINEA_POLAR, EMISION_LINEA_APOLAR = 3.0, 2.6
 
 
 def medir(receptor_mol, sujeto_mol, centro, *, nombres=None, cadenas=None,
@@ -49,6 +59,16 @@ def medir(receptor_mol, sujeto_mol, centro, *, nombres=None, cadenas=None,
     elegidos = contactos.elegir_por_tipo(polares, apolares, max_por_tipo,
                                          preferidos=preferidos)
     return elegidos, len(polares), len(apolares)
+
+
+def materiales_de_linea(plantilla: dict, prefijo: str):
+    """(polar, apolar): los materiales de las líneas punteadas, con la emisión de la clase."""
+    from . import arte, contactos      # importan bpy: sólo al montar la escena
+    polar = arte.copiar_material(plantilla["HBond_EGFR_Gold"], f"{prefijo}ContactoPolar")
+    arte.subir_emision(polar, EMISION_LINEA_POLAR)
+    apolar = contactos.material_hidrofobico(f"{prefijo}ContactoApolar")
+    arte.subir_emision(apolar, EMISION_LINEA_APOLAR)
+    return polar, apolar
 
 
 def tipo(c) -> str:

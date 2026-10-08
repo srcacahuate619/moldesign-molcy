@@ -299,10 +299,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     cadenas = paq.cadenas_conservadas or [paq.cadena_principal]
     presentados = [h.numero for h in (ctx.receptor.hotspots or [])]
     multicadena = len(cadenas) > 1
-    mat_polar = arte.copiar_material(ctx.arte["HBond_EGFR_Gold"],
-                                     pref + "ContactoPolar")
-    arte.subir_emision(mat_polar, 6.0)
-    mat_apolar = contactos.material_hidrofobico(pref + "ContactoHidrofobico")
+    mat_polar, mat_apolar = interacciones.materiales_de_linea(ctx.arte, pref)
     m.extra["materiales_contacto"] = [mat_polar, mat_apolar]
     datos_contactos = []
     m.extra["rotulos_por_pose"] = {}
@@ -346,6 +343,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
             m.anclas.append((ident, interacciones.texto(contacto, multicadena),
                              contacto.medio))
             m.extra["colores_anclas"][ident] = interacciones.color(contacto)
+            m.extra.setdefault("lineas_anclas", {})[ident] = (contacto.a.copy(), contacto.b.copy())
             rotulos.append(ident)
             if p["rank"] == 1:
                 # La mejor pose también se rotula en el primer plano del sitio, que
@@ -354,6 +352,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                 m.anclas.append((ident_sitio, interacciones.texto(contacto, multicadena),
                                  contacto.medio))
                 m.extra["colores_anclas"][ident_sitio] = interacciones.color(contacto)
+                m.extra["lineas_anclas"][ident_sitio] = (contacto.a.copy(), contacto.b.copy())
                 m.extra.setdefault("rotulos_sitio", []).append(ident_sitio)
             datos_contactos.append({"pose": p["rank"], **interacciones.registro(contacto),
                                     "tipo_bruto": contacto.tipo})
@@ -379,8 +378,6 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     m.medido["n_poses_dibujadas"] = len(poses)
     m.medido["contactos"] = datos_contactos
     m.medido["residuos_de_contacto"] = sorted({c["resid"] for c in datos_contactos})
-    # Los rótulos de las interacciones van por encima de la geometría (ver `maestro`).
-    m.extra["rotulos_encima"] = True
     #: El texto de pantalla de esta escena ocupa la esquina superior izquierda (NDC): los
     #: rótulos 3D no se colocan encima.
     m.extra["zona_texto_pantalla"] = [(-1.0, 0.45, 0.40, 1.0)]

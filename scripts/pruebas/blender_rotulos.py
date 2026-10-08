@@ -39,8 +39,8 @@ rangos = {"general": (1, 87), "aproximacion": (88, 143), "pausa_hotspots": (144,
 a, b = rangos["llegada_por_fundido"]
 
 pocos = sitio_activo.anotaciones(rangos, formato, formato.fps, n_sujeto=2)["sujeto"]
-comprobar("con 2 rótulos la entrada es la de siempre (0,5 s entre ellos)",
-          len(pocos) == 2 and pocos[1]["ventana"][0] - pocos[0]["ventana"][0] == max(4, int(0.5 * formato.fps)))
+comprobar("con 2 rótulos entran de uno en uno, 0,2 s entre ellos",
+          len(pocos) == 2 and pocos[1]["ventana"][0] - pocos[0]["ventana"][0] == round(0.2 * formato.fps))
 
 muchos = sitio_activo.anotaciones(rangos, formato, formato.fps, n_sujeto=7)["sujeto"]
 comprobar("con 7 rótulos entran los 7", len(muchos) == 7)

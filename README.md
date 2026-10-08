@@ -14,6 +14,7 @@ motor lo degrada y lo deja registrado en el acta del vídeo en vez de dibujarlo 
   propio motor aborta (la geometría de Molecular Nodes 4.x tiene otra escala).
 - La extensión **Molecular Nodes** (`bl_ext.blender_org.molecularnodes`; probada la 520.2.0), instalada desde Blender Extensions.
 - Windows y PowerShell: el lanzador `scripts/correr_caso.ps1` orquesta Blender en varias pasadas (escena, cierre de marca, codificación y sellado).
+- Python 3 con [Pillow](https://python-pillow.org/) (`-Python`): el contraste de la capa de rótulos y el sellado del MP4 corren fuera de Blender.
 
 ## Uso
 
@@ -43,6 +44,19 @@ Las pruebas que no necesitan Blender:
 cd scripts
 python -m pytest pruebas -q
 ```
+
+## Etiquetas y pausas de lectura
+
+Una etiqueta anclada en 3D sólo se lee con la imagen quieta. Cuando un grupo de etiquetas termina de entrar, el vídeo se **congela**: el mismo PNG —escena y capa de
+rótulos— se repite durante la pausa (de 2 a 3 s en Resultado según cuántas haya; 1 s por pose en Búsqueda y Ensamble). La pausa existe sólo en el montaje
+(`variables/pausas.py`): el maestro escribe `montaje.json` (fotograma de salida → PNG fuente) y `codificar.py` lo sigue, así que una imagen repetida no se rinde dos
+veces, y un tramo del guion que sería una imagen fija se rinde una sola vez. En el acta, `fotogramas` y `duracion_s` son los del vídeo (antes del cierre),
+`fotogramas_fuente` los del `.blend` y `fotogramas_render_unicos` los PNG que hay que rendir; `pausas` es el índice en segundos.
+
+Las etiquetas de un mismo instante se reparten juntas con restricciones duras (`variables/disposicion.py`): ningún texto se solapa con otro ni con el texto de
+pantalla, ni tapa el sujeto o una línea de interacción, y ninguna guía cruza otra. Si no caben, se achican y, como último recurso, se rotulan menos; el acta lo dice
+(`etiquetas_omitidas`). La capa de rótulos lleva un halo y una placa oscura detrás de cada etiqueta (`salida/contraste.py`, con Pillow). POLAR y APOLAR llevan el
+color de su línea; un hotspot del catálogo dice «HOTSPOT» y va en neutro.
 
 ## Licencia y marca
 

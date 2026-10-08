@@ -302,7 +302,9 @@ def estados(medidas, rangos, n_frames, formato, experimental=False):
 
 # ── rótulos 3D: cada interacción, en la ventana de su pose ─────────────────────
 def anotaciones(rangos, formato, fps, n_sujeto: int = 1, montado=None):
-    plan = {"hotspots": [], "sujeto": []}
+    """Como en `x`: los rótulos de cada pose se ven en UN fotograma, que el montaje
+    congela `escena_x.PAUSA_LECTURA_S`; la cámara sigue moviéndose fuera de él."""
+    plan = {"hotspots": [], "sujeto": [], "pausas": []}
     if montado is None or not formato.etiquetas_3d:
         return plan
     extra = montado.extra or {}
@@ -314,14 +316,17 @@ def anotaciones(rangos, formato, fps, n_sujeto: int = 1, montado=None):
     def entrada(a, b, rank):
         if b - a + 1 < MINIMO_ROTULO:
             return None
-        fade = max(2, min(int(0.2 * fps), (b - a + 1) // 3))
-        return {"ventana": (a, b), "colocar_en": (a + b) // 2,
-                "reservar": nubes.get(rank),
-                "fundido": [(a, a + fade, 0, 1), (b - fade, b, 1, 0)]}
+        f = (a + b) // 2
+        return {"ventana": (f, f), "colocar_en": f, "reservar": nubes.get(rank),
+                "fundido": []}
 
     for ident, _texto, _pos in montado.anclas:
         rank = next((r for r, ids in por_pose.items() if ident in ids), None)
         plan["sujeto"].append(entrada(*ventana_de[rank], rank) if rank in ventana_de else None)
+    from guiones import x as escena_x
+    for f in sorted({c["colocar_en"] for c in plan["sujeto"] if c}):
+        plan["pausas"].append({"en": f, "tipo": "lectura",
+                               "segundos": escena_x.PAUSA_LECTURA_S})
     return plan
 
 

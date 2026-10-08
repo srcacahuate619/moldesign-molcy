@@ -338,8 +338,11 @@ def test_cada_interaccion_se_rotula_en_la_ventana_de_su_pose():
     assert len(plan["sujeto"]) == len(m.anclas)
     ventanas = guion_y.ventanas(rangos["validacion"], 4, guion_y.MINIMO_POSE)
     for cfg, (a, b) in zip(plan["sujeto"], ventanas):
-        assert cfg["ventana"] == (a, b)
+        # Un fotograma de su ventana, que el montaje congela un segundo.
+        assert cfg["ventana"] == (cfg["colocar_en"],) * 2
         assert a <= cfg["colocar_en"] <= b
+    assert {p["en"] for p in plan["pausas"]} == {c["colocar_en"] for c in plan["sujeto"] if c}
+    assert all(p["segundos"] == 1.0 for p in plan["pausas"])
 
 
 def test_anotaciones_sin_sujeto_o_sin_etiquetas_es_vacio():

@@ -33,7 +33,7 @@ from nucleo.rutas import ESCENAS, PLANTILLA_ARTE, carpeta_de_caso  # noqa: E402
 from salida import control, procedencia, render                 # noqa: E402
 from variables import formato as fmt                            # noqa: E402
 from variables import guion as gui                              # noqa: E402
-from variables import controles, rotulos, sujeto                # noqa: E402
+from variables import controles, pausas, rotulos, sujeto        # noqa: E402
 
 
 # ── inventario ───────────────────────────────────────────────────────────
@@ -113,15 +113,18 @@ def _caja_en_pantalla(cam, puntos, margen: float = 0.07):
     return (min(xs) - margen, min(ys) - margen, max(xs) + margen, max(ys) + margen)
 
 
-def vista_previa(pos: float, salida: str, formato, rangos, n_frames,
+def vista_previa(pos: float, salida: str, formato, rangos, fuentes,
                  capa_titulo) -> int:
     """Un fotograma, para ver el efecto de los mandos antes de gastar un video.
 
     A media resolucion y con el titulo en la pasada principal (en el video va
     en su propia capa): es una aproximacion rapida, no un fotograma final.
+    La posicion (0-100) es la del VIDEO, pausas incluidas: `fuentes` dice que
+    fotograma del guion se ve en cada fotograma de salida.
     """
     sc = bpy.context.scene
-    f = 1 + int(round(min(100.0, max(0.0, pos)) / 100.0 * (n_frames - 1)))
+    n_frames = len(fuentes)
+    f = fuentes[int(round(min(100.0, max(0.0, pos)) / 100.0 * (n_frames - 1)))]
     beat = next((b for b, (i, j) in rangos.items() if i <= f <= j), "")
     if capa_titulo:
         for nombre in capa_titulo.get("objetos", [capa_titulo.get("objeto")]):
@@ -465,85 +468,56 @@ def main() -> int:
     proto = bpy.data.objects.get("Lab_Erlo")
     proto_guia = bpy.data.objects.get("Leader_Lab_Erlo")
     creados = []
+    ancladas = []           # etiquetas 3D: se colocan al final, juntas por fotograma
+    pantalla = []           # rótulos pegados a la cámara (título y datos)
+    omitidas = []
     capa_titulo = None
-    # Un guion que necesita saber QUÉ rótulos trae el sujeto (cada interacción en la
-    # ventana de su pose, en `x`) acepta `montado`; los demás no lo piden.
-    if "montado" in inspect.signature(guion.anotaciones).parameters:
-        plan = guion.anotaciones(rangos, formato, formato.fps,
-                                 n_sujeto=len(montado.anclas), montado=montado)
-    else:
-        plan = guion.anotaciones(rangos, formato, formato.fps,
-                                 n_sujeto=len(montado.anclas))
+    # Cada guion pide lo que necesita saber: cuántas anclas trae el sujeto, QUÉ
+    # rótulos trae (cada interacción en la ventana de su pose, en `x`) o si el
+    # receptor tiene hotspots (sin ellos la pausa de Resultado es una espera muerta).
+    pide = inspect.signature(guion.anotaciones).parameters
+    plan = guion.anotaciones(rangos, formato, formato.fps, **{
+        k: v for k, v in (("n_sujeto", len(montado.anclas)), ("montado", montado),
+                          ("n_hotspots", len(rec.hotspots))) if k in pide})
     # Las ancladas viven en el mundo y su tamano en pantalla lo pone la
     # perspectiva: el aumento de movil es solo para el texto de pantalla.
     esc_ancladas = (formato.escala_etiquetas_3d
                     if formato.escala_etiquetas_3d is not None
                     else formato.escala_texto)
+
+    def poner_en(r, cfg):
+        r.ventana, r.fundido = tuple(cfg["ventana"]), cfg.get("fundido") or []
+        r.colocar_en = cfg.get("colocar_en") or (r.ventana[0] + r.ventana[1]) // 2
+        r.reservar = cfg.get("reservar")
+
     if proto is not None:
-        grupo_h = []
         for i, (cfg, h) in enumerate(zip(plan["hotspots"], rec.hotspots)):
             c = receptor.centro_de_residuo(rec.molecula, h.numero,
                                            receptor.indice_de_cadena(paq, h.cadena))
             if c is None:
                 continue
             r = rotulos.crear_anclada(
-                f"hot{i}", h.etiqueta_con_cadena(paq.sitio_multicadena),
-                c, proto, proto_guia, esc_ancladas)
-            r.ventana, r.fundido = cfg["ventana"], cfg["fundido"]
-            grupo_h.append(r)
-        grupo_s = []
-        grupo_f = []        # los que traen su propio fotograma de colocación
+                f"hot{i}", h.rotulo(paq.sitio_multicadena), c, proto, proto_guia,
+                esc_ancladas * interacciones.ESCALA_HOTSPOT)
+            poner_en(r, cfg)
+            rotulos.tintar(r, interacciones.COLOR_HOTSPOT)
+            ancladas.append(r)
         colores = (montado.extra or {}).get("colores_anclas", {})
-        encima = bool((montado.extra or {}).get("rotulos_encima"))
         for cfg, (sid, texto, pos) in zip(plan["sujeto"], montado.anclas):
             if cfg is None:        # esta ancla no se rotula en este guion
                 continue
             r = rotulos.crear_anclada(
                 sid, texto, pos, proto, proto_guia,
-                esc_ancladas * (interacciones.ESCALA_ROTULO if sid in colores else 1.0))
-            r.ventana, r.fundido = cfg["ventana"], cfg["fundido"]
-            r.colocar_en = cfg.get("colocar_en")
-            r.reservar = cfg.get("reservar")
+                esc_ancladas * (interacciones.ESCALA_ROTULO
+                                if sid in colores or sid.startswith("dist")
+                                else interacciones.ESCALA_SUJETO))
+            poner_en(r, cfg)
+            # Lo que el rótulo de un sujeto nunca tapa: el propio sujeto (en `x` y
+            # en `y` el guion dice cuál de sus poses; si no, todo lo que se ve).
+            r.reservar = r.reservar or list(montado.dianas) or None
             if sid in colores:
                 rotulos.tintar(r, colores[sid])
-            (grupo_f if r.colocar_en is not None else grupo_s).append(r)
-        # En vertical las ancladas se colocan con busqueda dinamica (texto
-        # grande en cuadro angosto); en horizontal, la de siempre.
-        colocar = (rotulos.colocar_dinamicas if formato.vertical
-                   else rotulos.colocar_ancladas)
-        for grupo, beat, sep in ((grupo_h, "pausa_hotspots", 0.17),
-                                 (grupo_s, "llegada_por_fundido", 0.30),
-                                 (grupo_s, "llegada_sujeto", 0.30)):
-            if not grupo or beat not in rangos:
-                continue
-            a0, b0 = rangos[beat]
-            sc.frame_set((a0 + b0) // 2)
-            bpy.context.view_layer.update()
-            reservados = []
-            if encima and grupo is grupo_s and montado.dianas:
-                # Los rótulos no se colocan encima del propio ligando.
-                caja = _caja_en_pantalla(rig.camara, montado.dianas)
-                reservados = [caja] if caja else []
-            colocar(rig.camara, grupo, sep,
-                    igualar_tamano=encima and grupo is grupo_s,
-                    reservados=reservados)
-        # Cada rótulo con la cámara del instante en que se ve (en `x` la cámara
-        # sigue a cada pose, así que no hay un beat quieto donde colocarlos todos).
-        por_fotograma: dict[int, list] = {}
-        for r in grupo_f:
-            por_fotograma.setdefault(r.colocar_en, []).append(r)
-        for fotograma in sorted(por_fotograma):
-            sc.frame_set(fotograma)
-            bpy.context.view_layer.update()
-            reservados = list((montado.extra or {}).get("zona_texto_pantalla", ()))
-            nube = [p for r in por_fotograma[fotograma] for p in (r.reservar or ())]
-            if nube:
-                caja = _caja_en_pantalla(rig.camara, nube)
-                if caja:
-                    reservados.append(caja)
-            colocar(rig.camara, por_fotograma[fotograma], 0.30, igualar_tamano=True,
-                    reservados=reservados)
-        creados = grupo_h + grupo_s + grupo_f
+            ancladas.append(r)
         cfg_tit = (guion.titulo(rangos, formato, formato.fps)
                    if hasattr(guion, "titulo") else None)
         if cfg_tit:
@@ -557,29 +531,8 @@ def main() -> int:
                 lente_referencia=guion.LENTE_GENERAL,
                 distancia=medidas["dist_general"])
             t.ventana, t.fundido = cfg_tit["ventana"], cfg_tit["fundido"]
-            creados.append(t)
-            # El titulo va a la profundidad del receptor, asi que la geometria
-            # por delante puede taparlo: se rinde aparte y se compone encima.
-            capa_titulo = {"objeto": t.objeto.name, "objetos": [t.objeto.name],
-                           "ventana": tuple(cfg_tit["ventana"])}
-            # El titulo se ve SOLO por su pasada aislada (nitida, sin DoF); en
-            # el pase principal se esconde para que su copia suave no asome por
-            # los bordes del texto bueno y lo haga leer borroso.
-            t.objeto.visible_camera = False
+            pantalla.append(t)
             print(f"TITULO: {t.texto}")
-        if encima and (grupo_s or grupo_f):
-            # Las interacciones se rotulan en la capa del título: se rinde aparte y
-            # se compone encima, así ninguna cinta del receptor ni el propio ligando
-            # las tapan (el texto detrás de la molécula no se lee). Se esconden del
-            # pase principal por la misma razón que el título (ver arriba).
-            for r in grupo_s + grupo_f:
-                for objeto in (r.objeto, r.guia):
-                    objeto.visible_camera = False
-                    if capa_titulo is None:
-                        capa_titulo = {"objetos": [], "ventana": tuple(r.ventana)}
-                    capa_titulo["objetos"].append(objeto.name)
-                capa_titulo["ventana"] = (min(capa_titulo["ventana"][0], r.ventana[0]),
-                                          max(capa_titulo["ventana"][1], r.ventana[1]))
         if hasattr(guion, "rotulos_datos"):
             for cfg in guion.rotulos_datos(rangos, formato, formato.fps, montado):
                 dato = rotulos.crear_pantalla(
@@ -590,15 +543,96 @@ def main() -> int:
                     distancia=medidas["dist_sitio"] if "dist_sitio" in medidas
                     else medidas["dist_primer_plano"])
                 dato.ventana = tuple(cfg["ventana"])
-                creados.append(dato)
-                dato.objeto.visible_camera = False
+                pantalla.append(dato)
+
+        # Las ancladas, con la cámara del instante en que se leen (`colocar_en`) y
+        # todas las de ese instante a la vez: el reparto no acepta solapes entre
+        # ellas, ni con el texto de pantalla de ese fotograma (sus glifos reales),
+        # ni con el sujeto que señalan. Lo que no cabe se quita y consta en el acta.
+        por_fotograma: dict[int, list] = {}
+        for r in ancladas:
+            por_fotograma.setdefault(r.colocar_en, []).append(r)
+        zona_fija = list((montado.extra or {}).get("zona_texto_pantalla", ()))
+        lineas_anclas = (montado.extra or {}).get("lineas_anclas", {})
+        for fotograma in sorted(por_fotograma):
+            grupo = por_fotograma[fotograma]
+            sc.frame_set(fotograma)
+            bpy.context.view_layer.update()
+            textos = []
+            for rp in pantalla:
+                if rp.ventana[0] <= fotograma <= rp.ventana[1]:
+                    puntos = [rp.objeto.matrix_world @ Vector(p) for p in rp.objeto.bound_box]
+                    caja = _caja_en_pantalla(rig.camara, puntos, margen=0.015)
+                    if caja:
+                        textos.append(caja)
+            reservados = zona_fija + textos
+            nube = [p for r in grupo for p in (r.reservar or ())]
+            if nube:
+                caja = _caja_en_pantalla(rig.camara, nube, margen=0.05)
+                if caja:
+                    reservados.append(caja)
+            lineas = {r.id: lineas_anclas[r.id] for r in grupo if r.id in lineas_anclas}
+            for r in rotulos.colocar(rig.camara, grupo, reservados, zonas_texto=textos,
+                                     lineas=lineas):
+                omitidas.append({"id": r.id, "texto": r.texto, "fotograma": fotograma,
+                                 "razon": "no cabe sin solaparse con otra etiqueta o texto"})
+                for objeto in (r.objeto, r.guia):
+                    if objeto is not None:
+                        bpy.data.objects.remove(objeto, do_unlink=True)
+                ancladas.remove(r)
+        sc.frame_set(1)
+
+        # Todo el texto va en la capa de rótulos: se rinde aparte, sin
+        # profundidad de campo, y se compone encima. Así ninguna cinta del
+        # receptor ni el propio ligando lo tapan, y en el pase principal se
+        # esconde para que su copia desenfocada no asome por los bordes.
+        for r in pantalla + ancladas:
+            for objeto in (r.objeto, r.guia):
+                if objeto is None:
+                    continue
+                objeto.visible_camera = False
                 if capa_titulo is None:
-                    capa_titulo = {"objetos": [], "ventana": dato.ventana}
-                capa_titulo["objetos"].append(dato.objeto.name)
-                capa_titulo["ventana"] = (
-                    min(capa_titulo["ventana"][0], dato.ventana[0]),
-                    max(capa_titulo["ventana"][1], dato.ventana[1]))
+                    capa_titulo = {"objetos": [], "ventana": tuple(r.ventana), "ventanas": []}
+                capa_titulo["objetos"].append(objeto.name)
+            capa_titulo["ventanas"].append(list(r.ventana))
+            capa_titulo["ventana"] = (min(capa_titulo["ventana"][0], r.ventana[0]),
+                                      max(capa_titulo["ventana"][1], r.ventana[1]))
+        if cfg_tit:
+            capa_titulo["objeto"] = t.objeto.name
+        creados = ancladas + pantalla
     rotulos.hornear(creados, frames)
+
+    # Montaje: el vídeo se congela cuando un grupo de etiquetas termina de entrar
+    # y los tramos que serían imágenes idénticas se rinden una sola vez.
+    eventos: dict[int, list] = {}
+    for r in ancladas:
+        eventos.setdefault(r.colocar_en, []).append(r.id)
+    congelados = []
+    for p in plan.get("pausas", []):
+        tipo = p.get("tipo", "lectura")
+        ids = eventos.get(p["en"], [])
+        if tipo == "lectura" and not ids:
+            continue          # su grupo no llegó a rotularse: no hay nada que leer
+        congelados.append(pausas.Congelado(
+            p["en"], p.get("segundos") or pausas.segundos_de_lectura(len(ids)),
+            tipo, tuple(ids), p.get("omitir_hasta")))
+    montaje = pausas.montar(n_frames, formato.fps, congelados)
+    frames_render = sorted(set(montaje["fuentes"]))
+    if congelados:
+        print(f"MONTAJE: {montaje['fotogramas_salida']} fotogramas de vídeo con "
+              f"{montaje['fotogramas_render_unicos']} rendidos ({len(congelados)} pausas, "
+              f"{montaje['fotogramas_repetidos']} repetidos, "
+              f"{montaje['fotogramas_omitidos']} omitidos por idénticos)")
+    if capa_titulo:
+        # Donde mira `postcheck_nitidez` en el MP4: a mitad del primer texto, ya
+        # contado en fotogramas de SALIDA (las pausas lo desplazan).
+        v0, v1 = (capa_titulo.get("ventanas") or [capa_titulo["ventana"]])[0]
+        fu = montaje["fuentes"]
+        capa_titulo["cuadro_nitidez"] = 1 + min(range(len(fu)),
+                                                key=lambda i: abs(fu[i] - (v0 + v1) // 2))
+    etiquetas_lectura = [{"id": r.id, "ventana": list(r.ventana),
+                          "caja": list(r.objeto["caja_pantalla"])}
+                         for r in ancladas if "caja_pantalla" in r.objeto]
     # Credito de marca en vez de la ficha tecnica: el pdb_id y el sha siguen en
     # el acta y el MANIFEST, y la esquina inferior ya identifica la estructura.
     sello = procedencia.sellar(paq, formato, nota=procedencia.CREDITO)
@@ -607,7 +641,7 @@ def main() -> int:
 
     if vista:
         return vista_previa(a.vista_previa, a.salida_vista, formato, rangos,
-                            n_frames, capa_titulo)
+                            montaje["fuentes"], capa_titulo)
 
     sc.frame_set(1)
     blend = destino / "blender" / f"{paq.pdb_id}_{formato.nombre}{sufijo}.blend"
@@ -630,7 +664,17 @@ def main() -> int:
     registro = {
         "pdb_id": paq.pdb_id, "guion": guion.NOMBRE, "formato": formato.resumen(),
         "sujeto": {"id": mod_sujeto.ID, "disponible": ok, "razon": razon},
-        "fotogramas": n_frames, "duracion_s": round(n_frames / formato.fps, 2),
+        # `fotogramas` y `duracion_s` son los del VIDEO (antes del cierre), con sus
+        # pausas; el guion del .blend tiene `fotogramas_fuente` y solo se rinden
+        # `fotogramas_render_unicos`: una pausa repite un PNG, no lo vuelve a rendir.
+        "fotogramas": montaje["fotogramas_salida"],
+        "duracion_s": round(montaje["fotogramas_salida"] / formato.fps, 2),
+        "fotogramas_fuente": n_frames,
+        "fotogramas_render_unicos": montaje["fotogramas_render_unicos"],
+        "pausas": pausas.indice(montaje, formato.fps),
+        "montaje": montaje,
+        "etiquetas_lectura": etiquetas_lectura,
+        "etiquetas_omitidas": omitidas,
         "beats": {k: list(v) for k, v in rangos.items()},
         "medidas": limpio({k: v for k, v in medidas.items() if k != "arco"}),
         "arco": limpio(medidas["arco"]),
@@ -674,7 +718,8 @@ def main() -> int:
     if a.solo_construir:
         escribir(acta_final)
         print("CONSTRUIDO_OK", json.dumps(
-            {k: registro[k] for k in ("fotogramas", "duracion_s", "beats", "notas")},
+            {k: registro[k] for k in ("fotogramas", "duracion_s", "fotogramas_render_unicos",
+                                      "pausas", "beats", "notas")},
             ensure_ascii=False))
         return 0
 
@@ -685,13 +730,24 @@ def main() -> int:
     acta_parcial = destino / f"build_{formato.nombre}{sufijo}.parcial.json"
     escribir(acta_parcial)
     huella = huella_de_construccion(registro)
-    info = render.secuencia(destino / f"render_{formato.nombre}{sufijo}", frames,
-                            huella=huella)
+    carpeta_render = destino / f"render_{formato.nombre}{sufijo}"
+    info = render.secuencia(carpeta_render, frames_render, huella=huella,
+                            fijos={c.fuente for c in congelados})
+    # `codificar.py` monta el video siguiendo este mapa (fotograma de salida →
+    # PNG fuente): sin el, solo veria la secuencia rendida, sin pausas.
+    (carpeta_render / "montaje.json").write_text(
+        json.dumps({"fuentes": montaje["fuentes"]}), encoding="utf-8")
     registro["render"] = info
     if capa_titulo:
+        # Solo los fotogramas rendidos en los que algun texto existe: el resto
+        # de la capa seria transparente y costaba un render entero cada uno.
+        ventanas = capa_titulo.get("ventanas") or [capa_titulo["ventana"]]
+        con_texto = [f for f in frames_render
+                     if any(v0 <= f <= v1 for v0, v1 in ventanas)]
         info_capa = render.pasada_titulo(
             destino / f"render_{formato.nombre}{sufijo}_titulo",
-            capa_titulo.get("objetos", [capa_titulo.get("objeto")]), capa_titulo["ventana"])
+            capa_titulo.get("objetos", [capa_titulo.get("objeto")]), capa_titulo["ventana"],
+            fotogramas=con_texto)
         capa_titulo.update(info_capa)
         print(f"CAPA_TITULO: {info_capa['fotogramas']} fotogramas de titulo "
               f"con alfa; se componen por encima al codificar")

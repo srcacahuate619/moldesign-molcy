@@ -69,9 +69,7 @@ def _interacciones(paq, ctx, lig, centro, m) -> None:
         m.notas.append("no se midio ninguna interaccion polar (2.4-3.5 A) ni apolar "
                        "(2.8-4.5 A) entre la pose y el receptor")
         return
-    mat_polar = arte.copiar_material(ctx.arte["HBond_EGFR_Gold"], f"{paq.pdb_id}_ContactoPolar")
-    arte.subir_emision(mat_polar, 6.0)       # tiene que ganar al cartón iluminado
-    mat_apolar = contactos.material_hidrofobico(f"{paq.pdb_id}_ContactoApolar")
+    mat_polar, mat_apolar = interacciones.materiales_de_linea(ctx.arte, f"{paq.pdb_id}_")
     m.materiales_secundarios += [mat_polar, mat_apolar]
     multicadena = len(cadenas) > 1
     colores = {}
@@ -83,9 +81,8 @@ def _interacciones(paq, ctx, lig, centro, m) -> None:
         # `dist*`: el motor las trata como rótulo de distancia y las retira con las líneas.
         m.anclas.append((f"dist{i}", interacciones.texto(c, multicadena), c.medio))
         colores[f"dist{i}"] = interacciones.color(c)
+        # La línea que explica el rótulo: ningún texto se coloca encima (`maestro`).
+        m.extra.setdefault("lineas_anclas", {})[f"dist{i}"] = (c.a.copy(), c.b.copy())
     m.extra["colores_anclas"] = colores
-    # Los rótulos de esta pose van por encima de la geometría (ver `maestro`): un texto
-    # que un listón de la cinta tapa no se puede leer.
-    m.extra["rotulos_encima"] = True
     m.notas.append(f"{len(elegidos)} interaccion(es) dibujada(s) de {n_pol} polares y "
                    f"{n_apo} apolares medidas. " + interacciones.NOTA)

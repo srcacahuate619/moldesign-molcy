@@ -406,18 +406,22 @@ def estados(medidas, rangos, n_frames, formato, experimental=False):
 #: Una pose se ve menos de esto y su rótulo no llega a leerse: se omite (la vista de CPU, de
 #: tres segundos, reparte las nueve poses en unos pocos fotogramas cada una).
 MINIMO_ROTULO = 6
+#: Cuánto se congela la imagen para leer los rótulos de una pose (o del sitio).
+PAUSA_LECTURA_S = 1.0
 
 
 def anotaciones(rangos, formato, fps, n_sujeto: int = 1, montado=None):
-    """Cuándo entra y sale cada rótulo 3D de interacción, alineado con `montado.anclas`.
+    """Cuándo se ve cada rótulo 3D de interacción, alineado con `montado.anclas`.
 
-    Cada interacción (residuo, clase y distancia) se ve mientras su pose está en
-    pantalla, con la cámara de ese instante (`colocar_en`); las de la mejor pose
-    también durante el primer plano del sitio, que es cuando el bolsillo se ve más
-    de cerca. Las anclas que no son interacciones (la caja, el número de pose…) no
-    se rotulan en esta escena: su entrada es None.
+    La cámara de esta escena no se detiene nunca (sigue a cada pose), y un rótulo
+    anclado que viaja con la escena se ladea y no se lee. Así que los de cada pose
+    se ven en UN fotograma —a mitad de su ventana, con la cámara de ese instante—
+    y el montaje lo congela `PAUSA_LECTURA_S` (`variables/pausas.py`): la imagen se
+    detiene, se leen, y la escena sigue sin ellos. Las de la mejor pose también en
+    el primer plano del sitio. Las anclas que no son interacciones (la caja, el
+    número de pose…) no se rotulan: su entrada es None.
     """
-    plan = {"hotspots": [], "sujeto": []}
+    plan = {"hotspots": [], "sujeto": [], "pausas": []}
     if montado is None or not formato.etiquetas_3d:
         return plan
     extra = montado.extra or {}
@@ -433,22 +437,22 @@ def anotaciones(rangos, formato, fps, n_sujeto: int = 1, montado=None):
     def entrada(a, b, rank):
         if b - a + 1 < MINIMO_ROTULO:
             return None
-        fade = max(2, min(int(0.2 * fps), (b - a + 1) // 3))
-        return {"ventana": (a, b), "colocar_en": (a + b) // 2,
-                "reservar": nubes.get(rank),
-                "fundido": [(a, a + fade, 0, 1), (b - fade, b, 1, 0)]}
+        f = (a + b) // 2
+        return {"ventana": (f, f), "colocar_en": f, "reservar": nubes.get(rank),
+                "fundido": []}
 
     for ident, _texto, _pos in montado.anclas:
         cfg = None
         if ident in del_sitio and sitio:
-            # El primer plano: del segundo fotograma al final del beat, con la
-            # cámara quieta (después empieza a abrirse hacia la caja).
+            # El primer plano del sitio, con la cámara quieta.
             cfg = entrada(sitio[0] + 2, sitio[1], 1)
         else:
             rank = next((r for r, ids in por_pose.items() if ident in ids), None)
             if rank in ventana_de:
                 cfg = entrada(*ventana_de[rank], rank)
         plan["sujeto"].append(cfg)
+    for f in sorted({c["colocar_en"] for c in plan["sujeto"] if c}):
+        plan["pausas"].append({"en": f, "tipo": "lectura", "segundos": PAUSA_LECTURA_S})
     return plan
 
 

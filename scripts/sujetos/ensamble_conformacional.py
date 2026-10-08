@@ -140,9 +140,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     cadenas = paq.cadenas_conservadas or [paq.cadena_principal]
     presentados = [h.numero for h in (ctx.receptor.hotspots or [])]
     multicadena = len(cadenas) > 1
-    mat_polar = arte.copiar_material(ctx.arte["HBond_EGFR_Gold"], pref + "ContactoPolar")
-    arte.subir_emision(mat_polar, 6.0)
-    mat_apolar = contactos.material_hidrofobico(pref + "ContactoHidrofobico")
+    mat_polar, mat_apolar = interacciones.materiales_de_linea(ctx.arte, pref)
     m.extra["materiales_contacto"] = [mat_polar, mat_apolar]
     datos_contactos = []
     for p in poses:
@@ -169,6 +167,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
             m.anclas.append((ident, interacciones.texto(contacto, multicadena),
                              contacto.medio))
             m.extra["colores_anclas"][ident] = interacciones.color(contacto)
+            m.extra.setdefault("lineas_anclas", {})[ident] = (contacto.a.copy(), contacto.b.copy())
             rotulos.append(ident)
             datos_contactos.append({"pose": rank, **interacciones.registro(contacto),
                                     "tipo_bruto": contacto.tipo})
@@ -209,9 +208,8 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     m.extra["resumen"] = resumen
     m.extra["validacion"] = d.get("validacion")
     m.extra["contactos_visibles"] = True
-    # Los rótulos de las interacciones van por encima de la geometría (ver `maestro`)
-    # y el texto de pantalla ocupa la esquina superior izquierda: no se colocan ahí.
-    m.extra["rotulos_encima"] = True
+    # El texto de pantalla ocupa la esquina superior izquierda: los rótulos 3D no se
+    # colocan ahí (todos van ya por encima de la geometría, en la capa de rótulos).
     m.extra["zona_texto_pantalla"] = [ZONA_TEXTO_PANTALLA]
     m.notas.append("Interacciones de cada pose entregada contra los residuos de su "
                    "bolsillo (hotspots primero): polares y apolares, cada una con su "

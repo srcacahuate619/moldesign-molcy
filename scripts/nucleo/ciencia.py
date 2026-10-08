@@ -51,6 +51,16 @@ class Hotspot:
         """
         return f"{self.etiqueta} {self.cadena}" if mostrar else self.etiqueta
 
+    def rotulo(self, mostrar_cadena: bool = False) -> str:
+        """Etiqueta 3D del hotspot: el residuo con la tipografia de las
+        interacciones (LYS483) y un segundo renglon que dice QUE es. Sin distancia
+        ni clase: un hotspot es evidencia del catalogo sobre el receptor, no una
+        medida contra la pose, y con el aspecto de «LYS483 / POLAR 3.11 Å» se
+        confundia con una interaccion.
+        """
+        cadena = f":{self.cadena}" if mostrar_cadena and self.cadena else ""
+        return f"{self.resname.upper()}{self.numero}{cadena}\nHOTSPOT"
+
     @property
     def seleccion(self) -> str:
         """Seleccion MDAnalysis de la cadena lateral, para las varillas."""

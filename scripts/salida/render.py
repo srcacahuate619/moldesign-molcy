@@ -101,8 +101,14 @@ def png_completo(ruta: Path) -> bool:
 
 
 def secuencia(destino: Path, frames, huella: str | None = None,
-              cada: int = 50) -> dict:
+              cada: int = 50, fijos=()) -> dict:
     """Rinde la secuencia; si una corrida anterior quedo cortada, la retoma.
+
+    `frames` son los fotogramas que el montaje usa (`variables/pausas.py`): una
+    pausa repite un PNG y un tramo identico se salta, asi que no hay que rendir
+    todos los del guion. `fijos` son los que el video congela: se rinden sin
+    desenfoque de movimiento, porque una imagen quieta con estela se lee como
+    un error (la camara de `x` sigue moviendose en el instante congelado).
 
     Solo se reaprovechan fotogramas de la MISMA construccion: `huella` resume
     el acta, el codigo y la plantilla (ver `maestro.huella_de_construccion`).
@@ -127,18 +133,26 @@ def secuencia(destino: Path, frames, huella: str | None = None,
         print(f"RENDER_REANUDA: {len(hechos)}/{len(frames)} fotogramas ya "
               f"estaban hechos con la misma huella", flush=True)
     t0 = time.time()
-    for i, f in enumerate(pendientes):
-        comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
-        png = destino / f"f_{f:04d}.png"
-        # Un PNG truncado se borra antes: reescribir encima de un archivo
-        # existente daba «Could not open file» y Blender salia con codigo 0.
-        png.unlink(missing_ok=True)
-        sc.frame_set(f)
-        sc.render.filepath = str(destino / f"f_{f:04d}")
-        bpy.ops.render.render(write_still=True)
-        if i % cada == 0:
-            print(f"RENDER {len(hechos) + i + 1}/{len(frames)}  "
-                  f"{time.time() - t0:.0f}s", flush=True)
+    estela = getattr(sc.render, "use_motion_blur", False)
+    fijos = set(fijos)
+    try:
+        for i, f in enumerate(pendientes):
+            comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
+            png = destino / f"f_{f:04d}.png"
+            # Un PNG truncado se borra antes: reescribir encima de un archivo
+            # existente daba «Could not open file» y Blender salia con codigo 0.
+            png.unlink(missing_ok=True)
+            sc.frame_set(f)
+            if estela:
+                sc.render.use_motion_blur = f not in fijos
+            sc.render.filepath = str(destino / f"f_{f:04d}")
+            bpy.ops.render.render(write_still=True)
+            if i % cada == 0:
+                print(f"RENDER {len(hechos) + i + 1}/{len(frames)}  "
+                      f"{time.time() - t0:.0f}s", flush=True)
+    finally:
+        if estela:
+            sc.render.use_motion_blur = True
     seg = time.time() - t0
     n = max(len(pendientes), 1)
     print(f"RENDER_LISTO {len(frames)} ({len(pendientes)} rendidos ahora) en "
@@ -149,7 +163,7 @@ def secuencia(destino: Path, frames, huella: str | None = None,
 
 
 def pasada_titulo(destino: Path, nombre_objeto, ventana,
-                  cada: int = 50) -> dict:
+                  cada: int = 50, fotogramas=None) -> dict:
     """Segunda pasada solo-titulo, con alfa, para componer por encima.
 
     El rotulo de pantalla se cuelga a la distancia de ENFOQUE del plano, que es
@@ -162,7 +176,8 @@ def pasada_titulo(destino: Path, nombre_objeto, ventana,
     asomaria por los bordes y el texto se leeria borroso.
 
     Se rinden solo los fotogramas de su ventana: fuera de ella el rotulo ni
-    existe.
+    existe. Con `fotogramas`, solo esos (los que el montaje usa y en los que
+    algun texto se ve); `codificar.py` pone una capa vacia en los demas.
     """
     sc = bpy.context.scene
     cam = sc.camera
@@ -176,6 +191,9 @@ def pasada_titulo(destino: Path, nombre_objeto, ventana,
 
     a, b = int(ventana[0]), int(ventana[1])
     frames = [f for f in range(max(1, a), min(sc.frame_end, b) + 1)]
+    if fotogramas is not None:
+        pedidos = set(fotogramas)
+        frames = [f for f in frames if f in pedidos]
     antes = {o.name: o.hide_render for o in bpy.data.objects}
     film = sc.render.film_transparent
     color = sc.render.image_settings.color_mode

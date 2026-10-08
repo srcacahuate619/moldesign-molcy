@@ -2,7 +2,9 @@
 
 Declara beats con PESO relativo, no segundos: el formato reparte. El mismo
 guion da 22.7 s en `biblioteca`, 3 s en bucle en `previsualizacion` (donde las
-pausas se descartan solas por no admitir etiquetas) y 12 s en vertical.
+pausas se descartan solas por no admitir etiquetas) y 12 s en vertical. A eso
+el montaje le suma la lectura: cuando todos los rótulos de una pausa están en
+pantalla, la imagen se congela de 2 a 3 s (ver `anotaciones`).
 
 Lo que se muestra en el sitio lo pone el SUJETO, no este archivo. Hoy es el
 ligando cocristalizado; manana sera otro sin tocar nada de aqui.
@@ -205,46 +207,92 @@ def estados(medidas, rangos, n_frames, formato, experimental=False):
     return out
 
 
-def anotaciones(rangos, formato, fps, n_sujeto: int = 1):
-    """Cuando entra y sale cada rotulo. Solo dentro de pausas."""
-    fade = max(4, int(0.40 * fps))
-    paso = max(4, int(0.40 * fps))
-    plan = {"hotspots": [], "sujeto": []}
+#: Rótulos de Resultado: entran de uno en uno con la cámara quieta y, cuando ha
+#: entrado el último, la imagen se CONGELA (`variables/pausas.py`: de 2 a 3 s
+#: según cuántos haya) para leerlos todos juntos; después se van. Antes se veían
+#: completos un cuarto de segundo y se iban.
+ENTRADA_S, PASO_S, SALIDA_S = 0.2, 0.2, 0.3
+#: Los hotspots son pocos (hasta tres) y de un nombre: entran más despacio.
+ENTRADA_HOTSPOT_S, PASO_HOTSPOT_S = 0.4, 0.4
+#: Lo que tarda el sujeto en aparecer (`aparicion_del_sujeto`): sus rótulos entran
+#: después, cuando ya hay algo que señalar.
+FUNDIDO_SUJETO_S = 0.8
 
-    if formato.etiquetas_3d and "pausa_hotspots" in rangos:
+
+def _escalonar(inicio, sale, ultimo, n, paso, entra):
+    """Rótulos que entran de uno en uno a partir de `inicio` y salen juntos.
+
+    Salen con un fundido de `sale` a `ultimo`. Devuelve (cfgs, completo):
+    `completo` es el fotograma en el que el último terminó de entrar —el que se
+    congela— y donde se colocan todos. Si no caben, se acorta el paso; los que ni
+    así caben se quedan sin rótulo (ya era así).
+    """
+    if n < 1 or sale <= inicio:
+        return [], None
+    if n > 1:
+        paso = max(2, min(paso, (sale - 1 - inicio - entra) // (n - 1)))
+    entradas = []
+    for i in range(n):
+        e0 = inicio + i * paso
+        if e0 + entra >= sale:
+            break
+        entradas.append(e0)
+    if not entradas:
+        return [], None
+    completo = entradas[-1] + entra
+    return [{"ventana": (e0, ultimo), "colocar_en": completo,
+             "fundido": [(e0, e0 + entra, 0, 1), (sale, ultimo, 1, 0)]}
+            for e0 in entradas], completo
+
+
+def anotaciones(rangos, formato, fps, n_sujeto: int = 1, n_hotspots: int = 3):
+    """Cuándo entra y sale cada rótulo, y cuándo se congela la imagen para leerlo.
+
+    Solo dentro de pausas de cámara. Cada grupo (hotspots; sujeto y sus
+    interacciones) entra escalonado, se congela al completarse y sale. Los
+    fotogramas quietos que quedaban entre el congelado y la salida eran idénticos
+    al congelado: se omiten (`omitir_hasta`) y la lectura la da la pausa.
+
+    Sin rótulos de hotspot, la pausa de cámara es una imagen fija —el sitio, sin
+    nada que aparezca—: se rinde UN fotograma y se repite lo mismo que duraba.
+    """
+    plan = {"hotspots": [], "sujeto": [], "pausas": []}
+    if not formato.etiquetas_3d:
+        return plan
+    sale_en = max(4, round(SALIDA_S * fps))
+
+    if "pausa_hotspots" in rangos:
         a, b = rangos["pausa_hotspots"]
-        inicio = a + max(2, int(0.2 * fps))
-        for i in range(3):
-            e0 = inicio + i * paso
-            if e0 + fade >= b - 3:
-                break
-            plan["hotspots"].append({
-                "ventana": (e0, b - 3),
-                "fundido": [(e0, e0 + fade, 0, 1), (b - fade - 3, b - 3, 1, 0)]})
+        sale = b - 3 - sale_en
+        cfgs, completo = _escalonar(a + max(2, round(0.2 * fps)), sale, b - 3,
+                                    min(3, n_hotspots), max(4, round(PASO_HOTSPOT_S * fps)),
+                                    max(4, round(ENTRADA_HOTSPOT_S * fps)))
+        plan["hotspots"] = cfgs
+        if completo:
+            plan["pausas"].append({"en": completo, "tipo": "lectura",
+                                   "omitir_hasta": sale - 1 if sale - 1 > completo else None})
+        else:
+            plan["pausas"].append({"en": a, "tipo": "imagen_fija",
+                                   "segundos": (b - a + 1) / fps, "omitir_hasta": b})
 
     clave = "llegada_sujeto" if "llegada_sujeto" in rangos else "llegada_por_fundido"
-    if formato.etiquetas_3d and clave in rangos:
+    if clave in rangos and n_sujeto > 0:
         a, b = rangos[clave]
-        # El nombre del sujeto entra primero; las distancias medidas detras, una
-        # cada medio segundo, para que se lean en orden y no de golpe.
-        base = a + max(3, int(1.4 * fps))
-        paso = max(4, int(0.5 * fps))
-        n = max(1, n_sujeto)
-        entra = sale = fade
-        # Con muchos rótulos (la pose y cada interacción) entran más rápido y antes: el
-        # último tiene que terminar de aparecer ANTES de que empiece a irse el primero,
-        # o nunca se ven todos a la vez. Con pocos, como siempre.
-        if n > 2:
-            entra = sale = max(4, int(0.2 * fps))
-            mantener = max(6, int(0.25 * fps))
-            paso = max(2, min(paso, (b - 3 - base - entra - sale - mantener) // (n - 1)))
-        for i in range(n):
-            e0 = base + i * paso
-            if e0 + entra >= b - 3:
-                break
-            plan["sujeto"].append({
-                "ventana": (e0, b - 3),
-                "fundido": [(e0, e0 + entra, 0, 1), (b - sale - 3, b - 3, 1, 0)]})
+        sale = b - 3 - sale_en
+        # El nombre del sujeto entra primero y sus interacciones detrás, en orden.
+        cfgs, completo = _escalonar(a + max(4, round(FUNDIDO_SUJETO_S * fps)) + 1, sale, b - 3,
+                                    n_sujeto, max(2, round(PASO_S * fps)),
+                                    max(3, round(ENTRADA_S * fps)))
+        plan["sujeto"] = cfgs
+        if completo:
+            plan["pausas"].append({"en": completo, "tipo": "lectura",
+                                   "omitir_hasta": sale - 1 if sale - 1 > completo else None})
+    elif clave in rangos:
+        # Sin sujeto (el recorrido del receptor) nada aparece en este beat y la
+        # cámara sigue quieta: otra imagen fija, un solo render.
+        a, b = rangos[clave]
+        plan["pausas"].append({"en": a, "tipo": "imagen_fija",
+                               "segundos": (b - a + 1) / fps, "omitir_hasta": b})
     return plan
 
 

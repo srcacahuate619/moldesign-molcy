@@ -37,7 +37,7 @@ def montar_rig(pivote: Vector, lente_inicial: float, sensor: float = 36.0) -> Ri
     # Ajuste FIJO a horizontal. Con el AUTO de Blender, un render vertical
     # cambia el ajuste a VERTICAL (los 36 mm pasan a la altura) y todo el
     # encuadre medido —que supone ajuste horizontal en `encuadre`,
-    # `colocar_ancladas` y `crear_pantalla`— queda mal: en el piloto vertical
+    # `rotulos.colocar` y `crear_pantalla`— queda mal: en el piloto vertical
     # el titulo cayo fuera del cuadro (origen en NDC -0.21 en vez de 0.10).
     # En 16:9 AUTO ya es HORIZONTAL, asi que aqui no cambia nada.
     datos.sensor_fit = "HORIZONTAL"

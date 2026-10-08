@@ -326,15 +326,24 @@ def test_cada_interaccion_se_rotula_en_la_ventana_de_su_pose_y_las_de_la_mejor_t
     ventanas = guion_x.ventanas_poses(rangos, 3)
     for rank in (1, 2, 3):
         cfg = por_id[f"dist_p{rank}_0"]
-        assert cfg["ventana"] == ventanas[rank - 1]
-        assert ventanas[rank - 1][0] <= cfg["colocar_en"] <= ventanas[rank - 1][1]
+        a, b = ventanas[rank - 1]
+        # UN fotograma, a mitad de la ventana de su pose: el que el montaje congela.
+        assert cfg["ventana"] == (cfg["colocar_en"],) * 2 and a <= cfg["colocar_en"] <= b
+        assert por_id[f"dist_p{rank}_1"]["colocar_en"] == cfg["colocar_en"]
         assert cfg["reservar"] == [f"p{rank}"]                   # la nube de ESA pose
     sitio = por_id["dist_s_0"]
-    assert rangos["sitio"][0] < sitio["ventana"][0] and sitio["ventana"][1] == rangos["sitio"][1]
+    assert rangos["sitio"][0] < sitio["colocar_en"] <= rangos["sitio"][1]
     assert sitio["reservar"] == ["p1"]
-    for cfg in (c for c in plan["sujeto"] if c):
-        (a, b), fundido = cfg["ventana"], cfg["fundido"]
-        assert fundido[0][0] == a and fundido[1][1] == b and fundido[0][1] <= fundido[1][0]
+    assert all(c["fundido"] == [] for c in plan["sujeto"] if c)  # se ven enteros, sin fundido
+
+
+def test_cada_grupo_de_rotulos_de_x_congela_la_imagen_un_segundo():
+    formato, rangos = _rangos_x()
+    plan = guion_x.anotaciones(rangos, formato, formato.fps, montado=_montado_con_interacciones())
+    instantes = sorted({c["colocar_en"] for c in plan["sujeto"] if c})
+    assert [p["en"] for p in plan["pausas"]] == instantes and len(instantes) == 4  # sitio + 3 poses
+    assert all(p["segundos"] == guion_x.PAUSA_LECTURA_S == 1.0 and p["tipo"] == "lectura"
+               and not p.get("omitir_hasta") for p in plan["pausas"])
 
 
 def test_sin_montado_o_sin_etiquetas_3d_no_hay_rotulos_de_interaccion():
@@ -351,6 +360,7 @@ def test_una_pose_demasiado_corta_no_se_rotula():
     rangos, _ = gui.repartir(guion_x.BEATS, formato)
     rangos = guion_x.ajustar_rangos(rangos, formato)
     plan = guion_x.anotaciones(rangos, formato, formato.fps, montado=_montado_con_interacciones())
+    ventanas = guion_x.ventanas_poses(rangos, 3)
     for cfg in (c for c in plan["sujeto"] if c):
-        a, b = cfg["ventana"]
+        a, b = next(v for v in ventanas + [rangos["sitio"]] if v[0] <= cfg["colocar_en"] <= v[1])
         assert b - a + 1 >= guion_x.MINIMO_ROTULO
