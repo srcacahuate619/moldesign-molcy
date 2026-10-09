@@ -68,6 +68,22 @@ def test_dos_sugerencias_en_el_mismo_fotograma_quedan_en_una():
     assert [(x["fotograma"], x["tipo"]) for x in m] == [(20, "lectura")]
 
 
+def test_dos_tomas_que_se_verian_iguales_no_se_sugieren_dos_veces():
+    # El recorrido de un receptor sin ligando: el sitio vacío (144) y la «llegada» del
+    # sujeto que no llega (192) son la misma imagen; medido en 1HSG, 0,01/255 de diferencia.
+    rangos = {"general": (1, 87), "aproximacion": (88, 143), "pausa_hotspots": (144, 191),
+              "llegada_por_fundido": (192, 273), "exploracion": (274, 381)}
+    montaje = pausas.montar(381, 30, [pausas.Congelado(144, 0.5, "imagen_fija", (), 191),
+                                      pausas.Congelado(192, 2.7, "imagen_fija", (), 273)])
+    firma = {144: ("sitio", ()), 192: ("sitio", ())}.get
+    m = sugeridos(rangos, montaje["pausas"], 381, titulo=TITULO, papeles=PAPELES, firma=lambda f: firma(f))
+    assert [x["fotograma"] for x in m] == [42, 144, 327]
+    assert [x["orden"] for x in m] == [1, 2, 3]
+    # Sin firma (un controlador la invalida) no se descarta nada.
+    assert [x["fotograma"] for x in sugeridos(rangos, montaje["pausas"], 381, titulo=TITULO,
+                                              papeles=PAPELES)] == [42, 144, 192, 327]
+
+
 def test_beat_de_y_fotograma_libre():
     assert beat_de(88, RANGOS) == "aproximacion"
     assert beat_de(500, RANGOS) is None

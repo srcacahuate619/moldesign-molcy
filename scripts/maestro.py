@@ -740,6 +740,18 @@ def main() -> int:
         return vista_previa(a.vista_previa, a.salida_vista, formato, rangos,
                             montaje["fuentes"], capa_titulo)
     if a.fotos:
+        # Dos tomas que se verían iguales (mismas curvas en la escena y en la capa de
+        # rótulos) no se sugieren dos veces. Con un controlador la firma no ve todo:
+        # entonces no se descarta nada.
+        firma = None
+        if not firmas.hay_controladores():
+            rotulos_capa = capa_titulo["objetos"] if capa_titulo else []
+            firma_escena = firmas.de_escena(rotulos_capa, n_frames)
+            firma_capa = (firmas.de_capa(rotulos_capa, rig.camara,
+                                         {f: True for r in ancladas
+                                          for f in range(r.ventana[0], r.ventana[1] + 1)},
+                                         n_frames) if capa_titulo else {})
+            firma = lambda f: (firma_escena.get(f), firma_capa.get(f))  # noqa: E731
         return escena_para_fotos(
             paq, guion, formato, mod_sujeto, ok, razon, destino, sufijo, t0,
             beats=beats, rangos=rangos, n_frames=n_frames, montaje=montaje,
@@ -747,7 +759,8 @@ def main() -> int:
                 rangos, montaje["pausas"], n_frames,
                 titulo=cfg_tit if proto is not None else None,
                 papeles={b.id: b.papel for b in beats},
-                rotulos_por_pose=(montado.extra or {}).get("rotulos_por_pose")),
+                rotulos_por_pose=(montado.extra or {}).get("rotulos_por_pose"),
+                firma=firma),
             capa_titulo=capa_titulo,
             etiquetas_lectura=etiquetas_lectura, omitidas=omitidas, medidas=medidas,
             informe=informe, acta=acta, rec=rec, montado=montado, forzado=a.forzar,

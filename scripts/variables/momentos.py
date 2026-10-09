@@ -42,7 +42,8 @@ def _ventana_entera(titulo: dict) -> tuple[int, int] | None:
 
 
 def sugeridos(rangos: dict, pausas: list, n: int, *, titulo: dict | None = None,
-              papeles: dict | None = None, rotulos_por_pose: dict | None = None) -> list[dict]:
+              papeles: dict | None = None, rotulos_por_pose: dict | None = None,
+              firma=None) -> list[dict]:
     """Los momentos sugeridos, en el orden en que ocurren.
 
     `rangos`: beat -> (inicio, fin) en fotogramas fuente. `pausas`: las del
@@ -50,6 +51,10 @@ def sugeridos(rangos: dict, pausas: list, n: int, *, titulo: dict | None = None,
     `titulo`: la entrada del rótulo de pantalla del plano general (`ventana`,
     `fundido`), si el guion lo pone. `papeles`: beat -> papel. `rotulos_por_pose`:
     rango de la pose -> ids de sus etiquetas, para decir de qué pose es una pausa.
+    `firma`: fotograma -> algo comparable que es igual sólo si la imagen es la
+    misma (`salida/firmas.py`, escena y capa de rótulos). Con ella, una toma que
+    se vería idéntica a otra ya sugerida no se repite: en un receptor sin ligando
+    el sitio vacío y la llegada del sujeto (que no llega) son la misma imagen.
     """
     if n < 1:
         raise ValueError("momentos: la escena no tiene fotogramas")
@@ -83,7 +88,16 @@ def sugeridos(rangos: dict, pausas: list, n: int, *, titulo: dict | None = None,
     vistos: dict[int, dict] = {}
     for m in sorted(out, key=lambda m: m["fotograma"]):
         vistos.setdefault(m["fotograma"], m)      # dos sugerencias en el mismo fotograma: la primera
-    return [dict(m, orden=i) for i, m in enumerate(vistos.values(), start=1)]
+    unicos: list[dict] = []
+    imagenes: set = set()
+    for m in vistos.values():
+        clave = firma(m["fotograma"]) if firma is not None else None
+        if clave is not None and clave in imagenes:
+            continue                               # la misma imagen que una toma anterior
+        if clave is not None:
+            imagenes.add(clave)
+        unicos.append(m)
+    return [dict(m, orden=i) for i, m in enumerate(unicos, start=1)]
 
 
 def validar_fotograma(fotograma, n: int) -> int:
