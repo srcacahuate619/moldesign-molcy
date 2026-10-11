@@ -51,6 +51,16 @@ class Hotspot:
         """
         return f"{self.etiqueta} {self.cadena}" if mostrar else self.etiqueta
 
+    def rotulo(self, mostrar_cadena: bool = False) -> str:
+        """Etiqueta 3D del hotspot: el residuo con la tipografia de las
+        interacciones (LYS483) y un segundo renglon que dice QUE es. Sin distancia
+        ni clase: un hotspot es evidencia del catalogo sobre el receptor, no una
+        medida contra la pose, y con el aspecto de «LYS483 / POLAR 3.11 Å» se
+        confundia con una interaccion.
+        """
+        cadena = f":{self.cadena}" if mostrar_cadena and self.cadena else ""
+        return f"{self.resname.upper()}{self.numero}{cadena}\nHOTSPOT"
+
     @property
     def seleccion(self) -> str:
         """Seleccion MDAnalysis de la cadena lateral, para las varillas."""
@@ -196,6 +206,50 @@ class Paquete:
         """
         d = self.dock
         if d is None:
+            return None
+        p = (self.raiz / cual).resolve()
+        try:
+            p.relative_to(self.raiz.resolve())
+        except ValueError:
+            return None
+        return p if p.is_file() else None
+
+    #: Contrato del archivo `ensamble.json`: las conformaciones de entrada, las
+    #: poses entregadas por el ensamble de Vina y los controles físicos de cada
+    #: una. Es aparte de `docking.json` por la misma razón que éste lo es de
+    #: `scene.json`: una corrida de ensamble tiene K corridas de Vina detrás y
+    #: ningún archivo de poses único, así que no cabe en `moldesign.dock/1`.
+    SCHEMA_ENSAMBLE = "moldesign.ensamble/1"
+
+    @property
+    def ensamble(self) -> dict[str, Any] | None:
+        """El ensamble conformacional de molDesign-build, o None.
+
+        None es la respuesta honesta de cuatro ausencias distintas: el archivo
+        no está, no declara el contrato, no trae la caja o no trae conformaciones
+        y poses. El sujeto que lo necesita se abstiene diciendo cuál falta.
+        """
+        ruta = self.raiz / "ensamble.json"
+        if not ruta.exists():
+            return None
+        try:
+            d = json.loads(ruta.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(d, dict) or d.get("schema") != self.SCHEMA_ENSAMBLE:
+            return None
+        caja = d.get("caja") or {}
+        if not (caja.get("centro") and caja.get("tamano")
+                and d.get("conformeros") and d.get("poses")):
+            return None
+        return d
+
+    def ruta_ensamble(self, cual: str) -> Path | None:
+        """Ruta verificada de un archivo citado por ensamble.json.
+
+        Sólo se acepta que caiga DENTRO del paquete, igual que `ruta_dock`.
+        """
+        if self.ensamble is None or not isinstance(cual, str) or not cual:
             return None
         p = (self.raiz / cual).resolve()
         try:

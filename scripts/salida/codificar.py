@@ -16,6 +16,12 @@ en un canal superior con ALPHA_OVER. Se alinea por el numero de fotograma del
 primer PNG: f_0060.png entra en el fotograma 60. Asi el titulo nunca queda
 tapado por el receptor.
 
+Si la carpeta trae `montaje.json` (lo escribe el maestro), el video sigue su
+mapa `fuentes`: el fotograma de salida i es el fotograma fuente `fuentes[i]`. Una
+pausa de lectura repite un fotograma —no se rinde dos veces la misma imagen— y
+los mapas `escena` y `capa` dicen que PNG ya rendido se ve en su lugar cuando su
+estado es identico al de otro (`salida/firmas.py`), cada pasada por separado.
+
 Un video existente NUNCA se pisa por accidente: si <salida.mp4> ya existe hay
 que pedirlo explicito con --sobrescribir.
 
@@ -23,6 +29,7 @@ Al terminar un encode completo, los PNG de entrada se borran: el MP4 es el
 artefacto y los intermedios son ~1.3 GB por pieza.
 """
 import bpy
+import json
 import os
 import shutil
 import sys
@@ -60,6 +67,20 @@ OVER = argv[5] if len(argv) > 5 and argv[5] else ''
 pngs = sorted(os.path.basename(p) for p in glob.glob(os.path.join(CARPETA, '*.png')))
 if not pngs:
     raise SystemExit('no hay PNG en ' + CARPETA)
+FUENTES = None
+if os.path.isfile(os.path.join(CARPETA, 'montaje.json')):
+    with open(os.path.join(CARPETA, 'montaje.json'), encoding='utf-8') as fh:
+        MONTAJE = json.load(fh)
+    FUENTES = [int(f) for f in MONTAJE['fuentes']]
+    ESCENA = {int(k): int(v) for k, v in (MONTAJE.get('escena') or {}).items()}
+    CAPA = {int(k): int(v) for k, v in (MONTAJE.get('capa') or {}).items()}
+    pngs = ['f_%04d.png' % ESCENA.get(f, f) for f in FUENTES]
+    faltan = sorted({n for n in pngs if not os.path.isfile(os.path.join(CARPETA, n))})
+    if not FUENTES or faltan:
+        raise SystemExit('MONTAJE_INCOMPLETO: faltan %d fotogramas fuente (%s)'
+                         % (len(faltan), ', '.join(faltan[:5])))
+    print('ENCODE_MONTAJE: %d fotogramas de video con %d PNG distintos'
+          % (len(pngs), len(set(pngs))))
 print('ENCODE_ENTRADA: %d fotogramas desde %s' % (len(pngs), CARPETA))
 libre = shutil.disk_usage(os.path.dirname(SALIDA) or '.').free
 if libre < 1024 ** 3:
@@ -97,6 +118,20 @@ if OVER and os.path.isdir(OVER):
         try:
             inicio = int(os.path.splitext(os.path.basename(ovs[0]))[0].split('_')[-1])
         except ValueError:
+            inicio = 1
+        if FUENTES is not None:
+            # Una capa por fotograma de SALIDA: la de su PNG fuente, o una vacia
+            # donde ningun texto existe (esos no se rindieron).
+            vacio = os.path.join(OVER, 'vacio.png')
+            imagen = bpy.data.images.new('capa_vacia', width=ANCHO, height=ALTO, alpha=True)
+            imagen.generated_color = (0.0, 0.0, 0.0, 0.0)
+            imagen.filepath_raw = vacio
+            imagen.file_format = 'PNG'
+            imagen.save()
+            bpy.data.images.remove(imagen)
+            hay = {os.path.basename(r) for r in ovs}
+            capas = ['f_%04d.png' % CAPA.get(f, f) for f in FUENTES]
+            ovs = [os.path.join(OVER, n if n in hay else 'vacio.png') for n in capas]
             inicio = 1
         capa = tiras.new_image(name='titulo', filepath=ovs[0], channel=2,
                                frame_start=inicio)

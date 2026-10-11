@@ -14,6 +14,8 @@ motor lo degrada y lo deja registrado en el acta del vídeo en vez de dibujarlo 
   propio motor aborta (la geometría de Molecular Nodes 4.x tiene otra escala).
 - La extensión **Molecular Nodes** (`bl_ext.blender_org.molecularnodes`; probada la 520.2.0), instalada desde Blender Extensions.
 - Windows y PowerShell: el lanzador `scripts/correr_caso.ps1` orquesta Blender en varias pasadas (escena, cierre de marca, codificación y sellado).
+- Python 3 con [Pillow](https://python-pillow.org/) (`-Python`): el contraste de la capa de rótulos, el sellado del MP4 y el lanzador de fotos
+  (`scripts/correr_foto.py`) corren fuera de Blender.
 
 ## Uso
 
@@ -27,13 +29,37 @@ scripts\correr_caso.ps1 -Pdb 1HSG -Sufijo prueba -Carpeta C:\ruta\de\salida `
 ```
 
 Formatos: `previsualizacion` (1:1, 720 px), `social_vertical` (9:16, 1080×1920) y `biblioteca` (16:9, 1080p). Renderizadores: `gpu` (EEVEE) y `cpu` (Cycles; la escena se
-limita a tres segundos).
+limita a tres segundos). MolDesign sólo ofrece el vídeo con GPU; con CPU ofrece fotos (ver «Fotos»).
 
 Variables de entorno que reconoce: `MOLCY_SCENES_DIR`, `MOLCY_CASES_DIR`, `MOLCY_OUTPUT_DIR`, `MOLCY_BLENDER`, `MOLCY_ART_TEMPLATE`, `MOLCY_BRAND_CACHE_DIR` y
 `MOLCY_CPU_THREADS`. Ninguna ruta de una máquina concreta está escrita en el código.
 
 La arquitectura (un maestro, módulos atómicos para guion, sujeto y formato) se describe en el código de `scripts/`: cada variable vive en su fichero y el maestro los
 descubre solos.
+
+## Fotos
+
+Una foto es UN fotograma de la escena, rendido con **Cycles** a la resolución que se pida, en CPU o en GPU (CUDA, OptiX, HIP, oneAPI o Metal: el primero que Cycles
+encuentre). Con el mismo denoiser (OpenImageDenoise), la misma semilla y el mismo muestreo, la foto no depende del equipo: medido en 4FK3 a 1080×1920, la de CPU y la
+de GPU difieren 0,03/255 de media y 6/255 como máximo. Sin desenfoque de movimiento (una foto es un instante quieto) y sin sello quemado.
+
+```powershell
+python scripts\correr_foto.py preparar --pdb 4FK3 --guion sitio_activo --sujeto pose_evaluada `
+    --formato social_vertical --sufijo prueba --carpeta C:\ruta\de\salida --blender $env:MOLCY_BLENDER --dispositivo gpu
+python scripts\correr_foto.py tomar --escena C:\ruta\de\salida\escena_fotos_prueba.json --fotograma 253 `
+    --ancho 2160 --alto 3840 --muestras 128 --nombre foto_1 --carpeta C:\ruta\de\salida --blender $env:MOLCY_BLENDER --dispositivo gpu
+```
+
+- `preparar` construye la escena una sola vez (`maestro.py --fotos`: sin el límite de tres segundos de la CPU, que es del vídeo), guarda el `.blend` con todo
+  horneado y `escena_fotos_*.json`, y rinde una miniatura de cada **momento sugerido** (`tomas_*.json` y `tomas_*/`).
+- Los momentos sugeridos no son una lista a mano (`variables/momentos.py`): cada pausa del montaje (un grupo de etiquetas acaba de entrar entero, o la cámara se
+  detiene sobre el sitio), el plano general con el título y la mitad de cada beat de recorrido sin pausa propia. Fuera de ellos vale cualquier fotograma fuente.
+- `tomar` abre el `.blend` (`foto.py`), rinde la escena y, si en ese instante hay texto, la capa de rótulos aparte, y las compone con el mismo halo y placa que el
+  vídeo (`salida/foto_final.py`). Deja `<nombre>.png` (300 ppp) y `<nombre>.json`, el acta: fotograma, beat, momento, ajustes reales de Cycles, SHA-256 de la escena,
+  del `.blend` y del PNG, y qué hay en cada esquina de la capa (`esquinas`, alfa máximo) para que una marca no tape una etiqueta.
+- El lanzador es Python con Pillow, fuera de Blender; cada Blender que lanza se comprueba por su código de salida y su marca (`FOTOS_ESCENA_OK`, `FOTO_LISTA`).
+
+La marca de MolDesign en una foto no la pone el motor: la pone MolDesign sobre el PNG final.
 
 ## Pruebas
 
@@ -43,6 +69,21 @@ Las pruebas que no necesitan Blender:
 cd scripts
 python -m pytest pruebas -q
 ```
+
+## Etiquetas y pausas de lectura
+
+Una etiqueta anclada en 3D sólo se lee con la imagen quieta. Cuando un grupo de etiquetas termina de entrar, el vídeo se **congela**: el mismo PNG —escena y capa de
+rótulos— se repite durante la pausa (de 2 a 3 s en Resultado según cuántas haya; 1 s por pose en Búsqueda y Ensamble). La pausa existe sólo en el montaje
+(`variables/pausas.py`): el maestro escribe `montaje.json` (fotograma de salida → PNG fuente) y `codificar.py` lo sigue, así que una imagen repetida no se rinde dos
+veces, y un tramo del guion que sería una imagen fija se rinde una sola vez. En el acta, `fotogramas` y `duracion_s` son los del vídeo (antes del cierre),
+`fotogramas_fuente` los del `.blend` y `fotogramas_render_unicos` los PNG que hay que rendir; `pausas` es el índice en segundos.
+
+Además, un fotograma cuyo estado es idéntico al de otro ya rendido no se vuelve a rendir (`salida/firmas.py`: la «firma» es el valor de todas las curvas horneadas en ese fotograma; con desenfoque de movimiento cuentan también sus vecinos). La escena y la capa de rótulos se comparan por separado: mientras las etiquetas entran sobre una cámara quieta la escena no cambia, y el texto de pantalla no cambia porque la cámara se mueva. `montaje.json` lleva los mapas `escena` y `capa` (fotograma → PNG ya rendido).
+
+Las etiquetas de un mismo instante se reparten juntas con restricciones duras (`variables/disposicion.py`): ningún texto se solapa con otro ni con el texto de
+pantalla, ni tapa el sujeto o una línea de interacción, y ninguna guía cruza otra. Si no caben, se achican y, como último recurso, se rotulan menos; el acta lo dice
+(`etiquetas_omitidas`). La capa de rótulos lleva un halo y una placa oscura detrás de cada etiqueta (`salida/contraste.py`, con Pillow). POLAR y APOLAR llevan el
+color de su línea; un hotspot del catálogo dice «HOTSPOT» y va en neutro.
 
 ## Licencia y marca
 
@@ -54,3 +95,13 @@ ficheros, no sobre la marca. Una versión modificada que se distribuya debe quit
 
 Los vídeos que el motor genera no están cubiertos por la GPL (igual que lo que se renderiza con Blender), y todo vídeo que genera MolDesign termina con el cierre de
 la marca: el motor no ofrece ningún mando para quitarlo.
+
+## Búsqueda interna de Vina
+
+El guion `x` utiliza `traza_interna.tipo = vina_monte_carlo_bfgs_interno`: estados retenidos muestreados de una réplica, métricas reales por paso y contadores de todas las réplicas. No acepta el muestreo Metropolis independiente anterior. Sin archivos verificables se abstiene. El número de réplicas procede de la corrida y la animación no interpola movimiento físico. El cierre de MolDesign sigue siendo obligatorio.
+
+## Ensamble conformacional
+
+El guion `y` (sujeto `ensamble_conformacional`) cuenta una evaluación en modo ensamble: las geometrías de entrada que aportaron poses, la mejor pose de cada corrida independiente de Vina, y las poses entregadas por la piscina con sus controles físicos e interacciones polares y apolares. Lee `ensamble.json` (`schema = moldesign.ensamble/1`), un contrato aparte de `docking.json` porque un ensamble tiene K corridas de Vina detrás y ningún archivo de poses único. Cada archivo que cita se verifica contra su SHA-256 y, sin contrato verificable, la escena se abstiene.
+
+Qué no hace: no anima rotaciones entre conformaciones (ETKDG entrega geometrías finales, no una trayectoria) ni sugiere que una conformación sea «la correcta». Las conformaciones se alinean rígidamente a la mejor pose sólo para compararlas; Vina recibió cada una sin alinear. Los controles físicos se aplicaron después del acoplamiento, y «no evaluado» se rotula como tal, nunca como aprobado. En un formato corto sólo se enseñan los primeros elementos que caben con tiempo para leerse, y el acta (`mostradas_en_el_video`) dice cuántos. El cierre de MolDesign sigue siendo obligatorio.

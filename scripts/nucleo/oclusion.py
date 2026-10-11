@@ -69,9 +69,16 @@ def mejor_azimut(dianas, pivote: Vector, elevacion: float, dist: float,
     return mejor
 
 
-def _candidatos():
+#: Mínimo de visibilidad por debajo del cual un arco deja el sujeto tapado: el
+#: mismo umbral con el que la puerta de calidad (`salida/control.py`) avisa.
+UMBRAL_ARCO = 0.40
+
+
+def _candidatos(cortos: bool = False):
+    giros = (60.0, -60.0, 45.0, -45.0, 30.0, -30.0) if cortos \
+        else (120.0, -120.0, 150.0, -150.0, 90.0, -90.0)
     return [{"span": s, "el_fin": e, "rampa": r, "hump": h}
-            for s in (120.0, -120.0, 150.0, -150.0, 90.0, -90.0)
+            for s in giros
             for e in (22.0, 0.0, -18.0)
             for r, h in ((0.45, 10.0), (0.30, 0.0))]
 
@@ -95,17 +102,31 @@ def mejor_arco(dianas, pivote: Vector, az0: float, el0: float, d0: float,
 
     Un arco con buena media pero un instante tapado se nota mas que uno
     mediocre y parejo, asi que el minimo pesa 0.7 y la media 0.3.
+
+    Los giros grandes (90°–150°) son los que dan más cine, y se prueban primero.
+    Si NINGUNO esquiva el receptor (mínimo por debajo de `UMBRAL_ARCO`: en 4CA8
+    el mejor dejaba el ligando al 9 % durante parte de la retirada, con una
+    cinta oscura delante), se prueban también giros cortos (30°–60°), que se
+    quedan dentro de la ventana despejada que midió la pose. Los arcos que ya
+    eran buenos no cambian.
     """
     dg = bpy.context.evaluated_depsgraph_get()
     mejor = None
-    for c in (candidatos or _candidatos()):
-        v = [visibilidad(dianas, p, dg)
-             for p in recorrido(c, pivote, az0, el0, d0, muestras)]
-        puntuacion = min(v) * 0.7 + (sum(v) / len(v)) * 0.3
-        if mejor is None or puntuacion > mejor["puntuacion"]:
-            mejor = dict(c, puntuacion=round(puntuacion, 4),
-                         minimo=round(min(v), 4),
-                         media=round(sum(v) / len(v), 4))
+
+    def probar(lista):
+        nonlocal mejor
+        for c in lista:
+            v = [visibilidad(dianas, p, dg)
+                 for p in recorrido(c, pivote, az0, el0, d0, muestras)]
+            puntuacion = min(v) * 0.7 + (sum(v) / len(v)) * 0.3
+            if mejor is None or puntuacion > mejor["puntuacion"]:
+                mejor = dict(c, puntuacion=round(puntuacion, 4),
+                             minimo=round(min(v), 4),
+                             media=round(sum(v) / len(v), 4))
+
+    probar(candidatos or _candidatos())
+    if not candidatos and mejor["minimo"] < UMBRAL_ARCO:
+        probar(_candidatos(cortos=True))
     return mejor
 
 

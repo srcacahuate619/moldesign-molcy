@@ -97,7 +97,9 @@ if ($SoloConstruir) {
 if (-not (Test-Path $build)) { Fallo 'SIN_ACTA_FINAL' }
 try {
     $acta = Get-Content $build -Raw -Encoding UTF8 | ConvertFrom-Json
-    $esperados = [int]$acta.fotogramas
+    # Con pausas, el video tiene mas fotogramas que PNG: una pausa repite uno ya
+    # rendido. Lo que tiene que haber en disco son los fotogramas distintos.
+    $esperados = if ($null -ne $acta.fotogramas_render_unicos) { [int]$acta.fotogramas_render_unicos } else { [int]$acta.fotogramas }
     $fps = [int]$acta.formato.fps
     $ancho = [int]$acta.formato.ancho
     $alto = [int]$acta.formato.alto
@@ -134,13 +136,17 @@ if ($cierreS -gt 0) {
 $antes = Lineas
 $argsCodificar = @($render, $mp4, $fps, 0, 0)
 if ((Test-Path $over) -and ((Get-ChildItem "$over\*.png" -ErrorAction SilentlyContinue).Count -ge 1)) {
+    # Halo y placa oscura detras de cada etiqueta, en la capa (nunca en la escena).
+    & $Python (Join-Path $Root 'scripts\salida\contraste.py') $over $build *>&1 |
+        Out-File -FilePath $log -Append -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { Fallo 'CONTRASTE_FALLO' }
     $argsCodificar += $over
 } else {
     Log 'SIN_CAPA_TITULO'
 }
 if (-not $cierreDir -or -not $cierreManifiesto) { Fallo 'SIN_CIERRE' }
 $argsCodificar += @('--cierre', $cierreDir)
-& $Blender -b --python $codificar -- @argsCodificar *>&1 |
+& $Blender -b --factory-startup --python $codificar -- @argsCodificar *>&1 |
     Out-File -FilePath $log -Append -Encoding utf8
 $codigo = $LASTEXITCODE
 $nuevas = Nuevas $antes
@@ -158,7 +164,9 @@ if (Test-Path "${mp4}.sha256") { Log 'SELLO_OK' } else { Fallo 'SELLO_FALLO' }
 
 # Nitidez del titulo en el video final (no fatal): a mitad de su ventana.
 $cuadro = 60
-if ($acta.capa_titulo -and $acta.capa_titulo.ventana) {
+if ($acta.capa_titulo -and $acta.capa_titulo.cuadro_nitidez) {
+    $cuadro = [int]$acta.capa_titulo.cuadro_nitidez
+} elseif ($acta.capa_titulo -and $acta.capa_titulo.ventana) {
     $cuadro = [int](($acta.capa_titulo.ventana[0] + $acta.capa_titulo.ventana[1]) / 2)
 }
 & $Blender -b --factory-startup --python $postcheck -- $mp4 $cuadro $ancho $alto *>&1 |

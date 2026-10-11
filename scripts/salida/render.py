@@ -12,6 +12,9 @@ import bpy
 #: medio escribir (proceso muerto) no lo tiene.
 _FIN_PNG = b"\x00\x00\x00\x00IEND\xaeB`\x82"
 _ESPACIO_MINIMO = 1024 ** 3
+#: Tipos de objeto con geometría que se rinde. Los rótulos son FONT y no están aquí.
+_GEOMETRIA = frozenset({"MESH", "CURVE", "SURFACE", "META", "CURVES", "POINTCLOUD",
+                        "VOLUME", "GREASEPENCIL"})
 
 
 def comprobar_espacio(destino: Path, ancho: int, alto: int) -> None:
@@ -98,8 +101,14 @@ def png_completo(ruta: Path) -> bool:
 
 
 def secuencia(destino: Path, frames, huella: str | None = None,
-              cada: int = 50) -> dict:
+              cada: int = 50, fijos=()) -> dict:
     """Rinde la secuencia; si una corrida anterior quedo cortada, la retoma.
+
+    `frames` son los fotogramas que el montaje usa (`variables/pausas.py`): una
+    pausa repite un PNG y un tramo identico se salta, asi que no hay que rendir
+    todos los del guion. `fijos` son los que el video congela: se rinden sin
+    desenfoque de movimiento, porque una imagen quieta con estela se lee como
+    un error (la camara de `x` sigue moviendose en el instante congelado).
 
     Solo se reaprovechan fotogramas de la MISMA construccion: `huella` resume
     el acta, el codigo y la plantilla (ver `maestro.huella_de_construccion`).
@@ -124,18 +133,26 @@ def secuencia(destino: Path, frames, huella: str | None = None,
         print(f"RENDER_REANUDA: {len(hechos)}/{len(frames)} fotogramas ya "
               f"estaban hechos con la misma huella", flush=True)
     t0 = time.time()
-    for i, f in enumerate(pendientes):
-        comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
-        png = destino / f"f_{f:04d}.png"
-        # Un PNG truncado se borra antes: reescribir encima de un archivo
-        # existente daba «Could not open file» y Blender salia con codigo 0.
-        png.unlink(missing_ok=True)
-        sc.frame_set(f)
-        sc.render.filepath = str(destino / f"f_{f:04d}")
-        bpy.ops.render.render(write_still=True)
-        if i % cada == 0:
-            print(f"RENDER {len(hechos) + i + 1}/{len(frames)}  "
-                  f"{time.time() - t0:.0f}s", flush=True)
+    estela = getattr(sc.render, "use_motion_blur", False)
+    fijos = set(fijos)
+    try:
+        for i, f in enumerate(pendientes):
+            comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
+            png = destino / f"f_{f:04d}.png"
+            # Un PNG truncado se borra antes: reescribir encima de un archivo
+            # existente daba «Could not open file» y Blender salia con codigo 0.
+            png.unlink(missing_ok=True)
+            sc.frame_set(f)
+            if estela:
+                sc.render.use_motion_blur = f not in fijos
+            sc.render.filepath = str(destino / f"f_{f:04d}")
+            bpy.ops.render.render(write_still=True)
+            if i % cada == 0:
+                print(f"RENDER {len(hechos) + i + 1}/{len(frames)}  "
+                      f"{time.time() - t0:.0f}s", flush=True)
+    finally:
+        if estela:
+            sc.render.use_motion_blur = True
     seg = time.time() - t0
     n = max(len(pendientes), 1)
     print(f"RENDER_LISTO {len(frames)} ({len(pendientes)} rendidos ahora) en "
@@ -145,8 +162,8 @@ def secuencia(destino: Path, frames, huella: str | None = None,
             "por_fotograma": round(seg / n, 3)}
 
 
-def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
-                  cada: int = 50) -> dict:
+def pasada_titulo(destino: Path, nombre_objeto, ventana,
+                  cada: int = 50, fotogramas=None) -> dict:
     """Segunda pasada solo-titulo, con alfa, para componer por encima.
 
     El rotulo de pantalla se cuelga a la distancia de ENFOQUE del plano, que es
@@ -159,12 +176,14 @@ def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
     asomaria por los bordes y el texto se leeria borroso.
 
     Se rinden solo los fotogramas de su ventana: fuera de ella el rotulo ni
-    existe.
+    existe. Con `fotogramas`, solo esos (los que el montaje usa y en los que
+    algun texto se ve); `codificar.py` pone una capa vacia en los demas.
     """
     sc = bpy.context.scene
     cam = sc.camera
-    objeto = bpy.data.objects.get(nombre_objeto)
-    if objeto is None:
+    nombres = {nombre_objeto} if isinstance(nombre_objeto, str) else set(nombre_objeto)
+    objetos = [bpy.data.objects.get(n) for n in nombres]
+    if not nombres or any(o is None for o in objetos):
         return {"fotogramas": 0, "razon": f"no existe {nombre_objeto}"}
     if destino.exists():
         shutil.rmtree(destino)
@@ -172,40 +191,78 @@ def pasada_titulo(destino: Path, nombre_objeto: str, ventana,
 
     a, b = int(ventana[0]), int(ventana[1])
     frames = [f for f in range(max(1, a), min(sc.frame_end, b) + 1)]
+    if fotogramas is not None:
+        pedidos = set(fotogramas)
+        frames = [f for f in frames if f in pedidos]
     antes = {o.name: o.hide_render for o in bpy.data.objects}
     film = sc.render.film_transparent
     color = sc.render.image_settings.color_mode
     sello = sc.render.use_stamp
-    visible = objeto.visible_camera
+    visible = {o.name: o.visible_camera for o in objetos}
     dof = cam.data.dof.use_dof if cam else False
+    estela = getattr(sc.render, "use_motion_blur", False)
+    # Todo lo que se rinde y no es un rotulo. Antes sólo se apagaban las MALLAS, y
+    # además con `hide_render`, que en el sujeto y en la caja está ANIMADO: la
+    # animación se evalúa después de asignar la propiedad y gana, así que el
+    # ligando (animado) y la caja (una curva) salían en la capa del título y,
+    # por ir más cerca de la cámara que el rótulo, lo tapaban.
+    ocultables = [o for o in bpy.data.objects
+                  if o.type in _GEOMETRIA and o.name not in nombres]
+    acciones: dict[str, tuple] = {}
     t0 = time.time()
+
+    def apagar_geometria() -> None:
+        for o in ocultables:
+            datos = o.animation_data
+            if datos is not None and datos.action is not None and o.name not in acciones:
+                acciones[o.name] = (datos.action, getattr(datos, "action_slot", None))
+                datos.action = None
+            o.hide_render = True
+
     try:
-        for o in bpy.data.objects:
-            if o.type == "MESH":
-                o.hide_render = o.name != nombre_objeto
-        objeto.visible_camera = True
+        apagar_geometria()
+        for o in objetos:
+            o.visible_camera = True
         sc.render.film_transparent = True
         sc.render.use_stamp = False     # el sello ya va quemado en el principal
         if cam:
             cam.data.dof.use_dof = False
+        # Sin estela: el texto de pantalla va pegado a la cámara (no tiene movimiento
+        # relativo) y una etiqueta anclada sólo se ve con la imagen quieta. Así la
+        # capa depende sólo del estado del texto y se puede reutilizar entre
+        # fotogramas (`salida/firmas.py`).
+        sc.render.use_motion_blur = False
         sc.render.image_settings.color_mode = "RGBA"
         for i, f in enumerate(frames):
             comprobar_espacio(destino, sc.render.resolution_x, sc.render.resolution_y)
             sc.frame_set(f)
+            apagar_geometria()
             sc.render.filepath = str(destino / f"f_{f:04d}")
             bpy.ops.render.render(write_still=True)
             if i % cada == 0:
                 print(f"TITULO_PASADA {i + 1}/{len(frames)}  "
                       f"{time.time() - t0:.0f}s", flush=True)
     finally:
+        for nombre, (accion, ranura) in acciones.items():
+            objeto = bpy.data.objects.get(nombre)
+            if objeto is None or objeto.animation_data is None:
+                continue
+            objeto.animation_data.action = accion
+            if ranura is not None:
+                try:
+                    objeto.animation_data.action_slot = ranura
+                except (AttributeError, TypeError, RuntimeError):
+                    pass
         for o in bpy.data.objects:
             if o.name in antes:
                 o.hide_render = antes[o.name]
-        objeto.visible_camera = visible
+        for o in objetos:
+            o.visible_camera = visible[o.name]
         sc.render.film_transparent = film
         sc.render.use_stamp = sello
         if cam:
             cam.data.dof.use_dof = dof
+        sc.render.use_motion_blur = estela
         sc.render.image_settings.color_mode = color
     seg = time.time() - t0
     print(f"TITULO_LISTO {len(frames)} en {seg:.0f}s", flush=True)
