@@ -70,28 +70,13 @@ def _atomos(molecula, numeros):
     return pos[sel], z[sel], sel
 
 
-def mapa_de_residuos(ruta_pdb) -> dict[int, str]:
-    """{res_id: RESNAME} leido del PDB.
-
-    Molecular Nodes guarda `res_name` y `chain_id` como enteros, asi que el acta
-    salia con `resname: "3"` y `cadena: "1"`. El nombre real esta en el archivo.
-    """
-    out: dict[int, str] = {}
-    try:
-        with open(ruta_pdb, encoding="utf-8", errors="ignore") as fh:
-            for L in fh:
-                if L.startswith(("ATOM", "HETATM")):
-                    try:
-                        out.setdefault(int(L[22:26]), L[17:20].strip())
-                    except ValueError:
-                        pass
-    except OSError:
-        pass
-    return out
+# El mapa vive en `interacciones` (puro, sin bpy) y se busca por (cadena, número):
+# ver SCI-A-030 en su docstring.
+from .interacciones import mapa_de_residuos, nombre_de_residuo  # noqa: E402,F401
 
 
 def medir(receptor_mol, sujeto_mol, cerca_de: Vector | None = None,
-          radio_a: float = 14.0, nombres: dict[int, str] | None = None,
+          radio_a: float = 14.0, nombres: dict[tuple[str, int], str] | None = None,
           cadenas: list[str] | None = None,
           solo_residuos: set[tuple[str, int]] | None = None) -> list[Contacto]:
     """Contactos polares entre el sujeto y el receptor, por distancia.
@@ -141,7 +126,7 @@ def medir(receptor_mol, sujeto_mol, cerca_de: Vector | None = None,
             out.append(Contacto(
                 a=Vector(pr[i].tolist()), b=Vector(ps[j].tolist()),
                 distancia_a=float(d[k]) / ESCALA,
-                resname=(nombres or {}).get(numero, "?"),
+                resname=nombre_de_residuo(nombres, cadena, numero),
                 resid=numero,
                 cadena=cadena))
     out.sort(key=lambda c: c.distancia_a)
@@ -168,7 +153,7 @@ def _carbonos_apolares(z, pos, candidatos):
 
 def medir_hidrofobicos(receptor_mol, sujeto_mol,
                        cerca_de: Vector | None = None, radio_a: float = 14.0,
-                       nombres: dict[int, str] | None = None,
+                       nombres: dict[tuple[str, int], str] | None = None,
                        cadenas: list[str] | None = None,
                        solo_residuos: set[tuple[str, int]] | None = None
                        ) -> list[Contacto]:
@@ -211,7 +196,7 @@ def medir_hidrofobicos(receptor_mol, sujeto_mol,
             out.append(Contacto(
                 a=Vector(pr[i].tolist()), b=Vector(ps[j].tolist()),
                 distancia_a=float(d[k]) / ESCALA,
-                resname=(nombres or {}).get(numero, "?"),
+                resname=nombre_de_residuo(nombres, cadena, numero),
                 resid=numero, cadena=cadena, tipo="hidrofobico"))
     return sorted(out, key=lambda c: c.distancia_a)
 
