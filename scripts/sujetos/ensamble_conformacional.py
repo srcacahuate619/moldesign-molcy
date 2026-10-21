@@ -219,7 +219,9 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                    "linea y su rotulo de residuo, clase y distancia. " + interacciones.NOTA)
     m.medido.update(
         caja_a=d["caja"], resumen=resumen, validacion=d.get("validacion"),
-        conformeros=[{k: c.get(k) for k in ("indice", "semilla", "energia_mmff",
+        # `minimizacion`: MMFF94, UFF, sin_minimizar o None si el exportador no la
+        # declara (SCI-A-025); la nota de arriba remite aqui.
+        conformeros=[{k: c.get(k) for k in ("indice", "semilla", "energia_mmff", "minimizacion",
                                             "mejor_afinidad_kcal_mol", "poses_entregadas")}
                      for c in d["conformeros"]],
         poses_entregadas=[{k: p.get(k) for k in ("rank", "conformero", "rank_local",
