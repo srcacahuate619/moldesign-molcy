@@ -34,7 +34,7 @@ from nucleo.rutas import ESCENAS, PLANTILLA_ARTE, carpeta_de_caso  # noqa: E402
 from salida import control, firmas, procedencia, render         # noqa: E402
 from variables import formato as fmt                            # noqa: E402
 from variables import guion as gui                              # noqa: E402
-from variables import controles, momentos, pausas, rotulos, sujeto  # noqa: E402
+from variables import controles, momentos, pausas, presentacion, rotulos, sujeto  # noqa: E402
 
 
 # ── inventario ───────────────────────────────────────────────────────────
@@ -203,7 +203,7 @@ def escena_para_fotos(paq, guion, formato, mod_sujeto, ok, razon, destino: Path,
         "control_de_calidad": informe.como_lista(),
         "forzado": bool(forzado),
         "decisiones_del_contrato": acta.decisiones,
-        "presentacion": {"titulo": rotulos.titulo_pantalla(paq.pdb_id, paq.nombre, paq.resolucion)[0],
+        "presentacion": {"titulo": rotulos.titulo_pantalla(paq.pdb_id, paq.nombre, paq.resolucion, alias=(ajustes.get("presentacion") or {}).get("titulo"))[0],
                          "experimental_look": bool(experimental)},
         "ajustes": ({"entrada": ajustes, "resueltos": resueltos} if resueltos else None),
         "notas": rec.notas + montado.notas,
@@ -387,7 +387,7 @@ def main() -> int:
     formato = fmt.cargar(a.formato)
     # Los mandos de la interfaz: solo lo que el usuario movio. Sin ajustes,
     # formato y extras quedan exactamente como en produccion.
-    ajustes = controles.leer(a.ajustes) if a.ajustes else {}
+    ajustes = controles.leer_entrada(a.ajustes) if a.ajustes else {}
     formato, extras, resueltos = controles.aplicar(formato, ajustes)
     if not a.fotos:
         # El límite de la CPU es del VÍDEO. Una foto es un fotograma: la escena se
@@ -412,6 +412,9 @@ def main() -> int:
     sc = bpy.context.scene
     arte.limpiar_escena_por_defecto()
     arte_importado = arte.importar()
+    visual = extras.get("presentacion")
+    if visual is not None:
+        presentacion.aplicar_colores_interaccion(visual)
     rec = receptor.montar(paq, arte_importado, n_hotspots=a.hotspots)
     arte.acabado_receptor(rec.mat_cartoon, experimental=experimental)
     receptor.anclar_gradiente(rec, Vector(paq.objetivo))
@@ -424,6 +427,9 @@ def main() -> int:
         ctx = sujeto.Contexto(receptor=rec, arte=arte_importado,
                               pivote=Vector(paq.objetivo))
         montado = mod_sujeto.cargar(paq, ctx)
+        montado.extra["contactos_visibles"] = extras["contactos"]
+        if not extras["contactos"]:
+            montado.notas.append("Ajuste visual: contactos no dibujados; mediciones conservadas.")
         if not extras["contactos"] and montado.secundarios:
             # Apagar la capa no cambia lo medido (sigue en el acta): solo no se
             # dibujan las lineas ni sus etiquetas de distancia.
@@ -447,6 +453,15 @@ def main() -> int:
     if dibujados:
         print(f"VARILLAS: residuos {dibujados}")
 
+    if visual is not None:
+        if visual["receptor"] == "oculto" and mod_sujeto.ID == "receptor_solo":
+            raise ValueError("Ocultar el receptor deja esta escena sin contenido molecular.")
+        presentacion.aplicar_montado(visual, rec, montado)
+    if extras.get("ensamble_fluido"):
+        if not hasattr(guion, "configurar_fluido"):
+            raise ValueError("El modo fluido sólo corresponde a Ensamble.")
+        guion.configurar_fluido(montado, extras["ensamble_fluido"])
+
     # guion x e y formato: cuentan una película propia, no una escena de sitio activo
     if guion.NOMBRE in ("x", "y"):
         from dataclasses import replace
@@ -455,8 +470,9 @@ def main() -> int:
     rangos, n_frames = gui.repartir(beats, formato)
     if hasattr(guion, "ajustar_rangos"):
         pide = inspect.signature(guion.ajustar_rangos).parameters
-        rangos = guion.ajustar_rangos(rangos, formato, **(
-            {"experimental": experimental} if "experimental" in pide else {}))
+        rangos = guion.ajustar_rangos(rangos, formato, **{
+            k: v for k, v in (("experimental", experimental), ("montado", montado))
+            if k in pide})
         # Un guion puede alargar un beat (la vuelta final de Resultado): la escena
         # dura lo que digan sus rangos, no el presupuesto inicial del formato.
         n_frames = max(b for _a, b in rangos.values())
@@ -617,9 +633,12 @@ def main() -> int:
             ancladas.append(r)
         cfg_tit = (guion.titulo(rangos, formato, formato.fps)
                    if hasattr(guion, "titulo") else None)
+        if not cfg_tit and visual is not None and visual["titulo"]:
+            # Un alias identifica la pieza completa, también las poses guardadas.
+            cfg_tit = {"ventana": (1, n_frames), "fundido": []}
         if cfg_tit:
             texto_titulo, escala_titulo = rotulos.titulo_pantalla(
-                paq.pdb_id, paq.nombre, paq.resolucion,
+                paq.pdb_id, paq.nombre, paq.resolucion, alias=(ajustes.get("presentacion") or {}).get("titulo"),
                 base=formato.escala_texto * 0.78)
             t = rotulos.crear_pantalla(
                 "titulo", texto_titulo,
@@ -628,6 +647,9 @@ def main() -> int:
                 lente_referencia=guion.LENTE_GENERAL,
                 distancia=medidas["dist_general"])
             t.ventana, t.fundido = cfg_tit["ventana"], cfg_tit["fundido"]
+            if visual is not None and visual["titulo"]:
+                presentacion.fijar_alias_en_cuadro(
+                    t.objeto, rig.camara, frames, guion.LENTE_GENERAL)
             pantalla.append(t)
             print(f"TITULO: {t.texto}")
         if hasattr(guion, "rotulos_datos"):
@@ -820,7 +842,7 @@ def main() -> int:
         "forzado": bool(a.forzar),
         "presentacion": {
             "titulo": rotulos.titulo_pantalla(
-                paq.pdb_id, paq.nombre, paq.resolucion)[0],
+                paq.pdb_id, paq.nombre, paq.resolucion, alias=(ajustes.get("presentacion") or {}).get("titulo"))[0],
             "experimental_look": bool(experimental),
         },
         "capa_titulo": capa_titulo,

@@ -12,9 +12,10 @@ Cuenta, en cinco beats, lo que el producto hizo con una evaluación de ensamble:
 El encuadre es el de la escena `x` (`ajustar_medidas` y el recorrido suavizado):
 la cámara sigue lo que se enseña y deja siempre el sitio sin receptor por delante.
 
-Lo que NO hace: no anima rotaciones entre conformaciones (ETKDG entrega geometrías
-finales discretas, no una trayectoria) ni sugiere que una conformación sea «la
-correcta». Cada elemento visual cita una medición del contrato `ensamble.json`.
+ETKDG entrega geometrías finales discretas, no una trayectoria. Sin ajustes,
+se presentan esas entradas por cortes. El prototipo explícito ensamble_fluido
+añade excursiones ilustrativas cerradas con torsión y giro simultáneos; no
+atribuye mediciones a los intermedios ni sugiere una conformación «correcta».
 """
 from __future__ import annotations
 
@@ -65,8 +66,11 @@ BEATS = [
 _ORDEN = tuple(b.id for b in BEATS)
 
 
-def ajustar_rangos(rangos, formato):
+def ajustar_rangos(rangos, formato, montado=None):
     """Fija el primer segundo y reserva los últimos tres para la retirada."""
+    if montado is not None and montado.extra.get("ensamble_fluido"):
+        from guiones import _ensamble_fluido as fluido
+        return fluido.rangos(formato.fps)
     if formato.bucle or not all(k in rangos for k in _ORDEN):
         return rangos
     n = max(b for _, b in rangos.values())
@@ -179,6 +183,10 @@ def ajustar_medidas(medidas, paq, rec, montado, formato):
     extra = montado.extra
     extra["puntos_instantaneas"] = extra.get("puntos_conformeros", [])
     medidas["conteos_y"] = conteos(montado)
+    if extra.get("ensamble_fluido"):
+        medidas["ensamble_fluido"] = {
+            "variante": extra["ensamble_fluido"]["variante"],
+            "poses": len(extra.get("poses") or [])}
     puntos = extra.get("ligando_dock_puntos") or []
     escena_x.ajustar_medidas(medidas, paq, rec, montado, formato,
                              visibilidad=_visibilidad_del_ligando(puntos) if puntos else None)
@@ -298,6 +306,9 @@ def estados(medidas, rangos, n_frames, formato, experimental=False):
             estado["portal"] = escena_x._portal_fantasma(
                 T, pos, D, fuerza, dict(medidas, radio_portal=radio))
         out.append(estado)
+    if medidas.get("ensamble_fluido"):
+        from guiones import _ensamble_fluido as fluido
+        out = fluido.camara_fija(out, rangos, medidas["ensamble_fluido"]["poses"])
     return out
 
 
@@ -318,14 +329,14 @@ def anotaciones(rangos, formato, fps, n_sujeto: int = 1, montado=None):
         if b - a + 1 < MINIMO_ROTULO:
             return None
         f = (a + b) // 2
-        return {"ventana": (f, f), "colocar_en": f, "reservar": nubes.get(rank),
+        return {"ventana": ((a, b) if extra.get("ensamble_fluido") else (f, f)), "colocar_en": f, "reservar": nubes.get(rank),
                 "fundido": []}
 
     for ident, _texto, _pos in montado.anclas:
         rank = next((r for r, ids in por_pose.items() if ident in ids), None)
         plan["sujeto"].append(entrada(*ventana_de[rank], rank) if rank in ventana_de else None)
     from guiones import x as escena_x
-    for f in sorted({c["colocar_en"] for c in plan["sujeto"] if c}):
+    for f in sorted({c["colocar_en"] for c in plan["sujeto"] if c}) if not extra.get("ensamble_fluido") else []:
         plan["pausas"].append({"en": f, "tipo": "lectura",
                                "segundos": escena_x.PAUSA_LECTURA_S})
     return plan
@@ -395,6 +406,9 @@ def rotulos_datos(rangos, formato, fps, montado):
     if not formato.rotulos_pantalla:
         return []
     extra = montado.extra or {}
+    if extra.get("ensamble_fluido"):
+        from guiones import _ensamble_fluido as fluido
+        return fluido.rotulos(rangos, formato, fps, montado, _controles)
     conformeros = extra.get("conformeros") or []
     corridas = extra.get("corridas") or []
     poses = extra.get("poses") or []
@@ -467,6 +481,9 @@ def rotulos_datos(rangos, formato, fps, montado):
 # ── visibilidad por beat ─────────────────────────────────────────────────────
 def mostradas(rangos, montado) -> dict:
     """Cuántos elementos de cada beat caben en el formato, frente a los que hay."""
+    if montado.extra.get("ensamble_fluido"):
+        from guiones import _ensamble_fluido as fluido
+        return fluido.mostradas(montado)
     n = conteos(montado)
     vistas = {"conformeros": len(_ventanas_conformeros(rangos, n["conformeros"])),
               "corridas": len(_ventanas_corridas(rangos, n["corridas"])),
@@ -476,6 +493,9 @@ def mostradas(rangos, montado) -> dict:
 
 def animar_sujeto(rangos, fps, montado, frames):
     """Enseña cada conformación, cada corrida y cada pose en su turno."""
+    if montado.extra.get("ensamble_fluido"):
+        from guiones import _ensamble_fluido as fluido
+        return fluido.animar(rangos, fps, montado, frames)
     import bpy
     from nucleo.horneado import hornear
     extra = montado.extra or {}
@@ -514,3 +534,9 @@ def animar_sujeto(rangos, fps, montado, frames):
         oculto = [0.0 if any(a <= f <= b for a, b in ventanas_obj) else 1.0 for f in frames]
         hornear(obj, "hide_render", -1, frames, oculto, "CONSTANT")
         hornear(obj, "hide_viewport", -1, frames, oculto, "CONSTANT")
+
+
+def configurar_fluido(montado, configuracion):
+    """Activación explícita del prototipo; sin ella el guion conserva producción."""
+    from guiones import _ensamble_fluido as fluido
+    return fluido.configurar(montado, configuracion)

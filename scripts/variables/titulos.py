@@ -166,14 +166,14 @@ def nombre_legible(nombre: str) -> str:
 
 
 def titulo_pantalla(pdb_id: str, nombre: str, resolucion=None,
-                    base: float = 0.78, ancho: int = 42) -> tuple[str, float]:
+                    base: float = 0.78, ancho: int = 42, *, alias: str | None = None) -> tuple[str, float]:
     """Devuelve texto y escala seguros para el rotulo inferior."""
-    corto = NOMBRES_CURADOS.get(str(pdb_id).upper(), nombre_legible(nombre))
+    corto = alias if alias is not None else NOMBRES_CURADOS.get(str(pdb_id).upper(), nombre_legible(nombre))
     res = f" · {resolucion} Å" if resolucion else ""
     completo = f"{corto}   ·   {pdb_id}{res}"
-    lineas = textwrap.wrap(completo, width=ancho, break_long_words=False,
+    lineas = textwrap.wrap(completo, width=ancho, break_long_words=alias is not None,
                            break_on_hyphens=False) or [completo]
-    if len(lineas) > 2:
+    if len(lineas) > 2 and alias is None:
         lineas = lineas[:2]
         lineas[-1] = textwrap.shorten(lineas[-1], width=ancho,
                                       placeholder="…")
