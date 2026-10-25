@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 import textwrap
 
+from marca.idioma import idioma_del_cierre
+
 # Nombres editoriales cortos para casos con identidad cientifica inequivoca.
 # El fallback procedural evita que un TITLE nuevo reviente el encuadre.
 NOMBRES_CURADOS = {
@@ -165,9 +167,19 @@ def nombre_legible(nombre: str) -> str:
     return (s[:1].upper() + s[1:]) or "Molecular target"
 
 
+#: Etiqueta de la sección del catálogo que declara `scene.json` (`receptor.seccion`), por idioma
+#: del cierre. Sólo «demostracion» se rotula aquí: el vídeo dice lo que dice la aplicación.
+ETIQUETAS_DE_SECCION = {"demostracion": {"es": "Demostración", "en": "Demonstration"}}
+
+
 def titulo_pantalla(pdb_id: str, nombre: str, resolucion=None,
-                    base: float = 0.78, ancho: int = 42) -> tuple[str, float]:
-    """Devuelve texto y escala seguros para el rotulo inferior."""
+                    base: float = 0.78, ancho: int = 42,
+                    seccion: str | None = None, idioma: str | None = None) -> tuple[str, float]:
+    """Devuelve texto y escala seguros para el rotulo inferior.
+
+    Con `seccion="demostracion"` añade una línea con la etiqueta del catálogo en el idioma del
+    cierre (`marca.idioma`), para que el título y el vídeo digan lo mismo que la aplicación.
+    """
     corto = NOMBRES_CURADOS.get(str(pdb_id).upper(), nombre_legible(nombre))
     res = f" · {resolucion} Å" if resolucion else ""
     completo = f"{corto}   ·   {pdb_id}{res}"
@@ -177,6 +189,9 @@ def titulo_pantalla(pdb_id: str, nombre: str, resolucion=None,
         lineas = lineas[:2]
         lineas[-1] = textwrap.shorten(lineas[-1], width=ancho,
                                       placeholder="…")
+    etiqueta = ETIQUETAS_DE_SECCION.get(seccion or "", {}).get(idioma or idioma_del_cierre())
+    if etiqueta:
+        lineas.append(etiqueta)
     mayor = max(len(x) for x in lineas)
     factor = min(1.0, max(0.72, 38.0 / max(mayor, 1)))
     if len(lineas) > 1:

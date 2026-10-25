@@ -47,6 +47,46 @@ COLOR_HOTSPOT = (0.86, 0.89, 0.93)
 EMISION_LINEA_POLAR, EMISION_LINEA_APOLAR = 3.0, 2.6
 
 
+def mapa_de_residuos(ruta_pdb) -> dict[tuple[str, int], str]:
+    """{(cadena, res_id): RESNAME} leído del PDB.
+
+    Molecular Nodes guarda `res_name` y `chain_id` como enteros, así que el
+    nombre real se lee del archivo. SCI-A-030: antes la clave era sólo el
+    número, y el primero que aparecía ganaba; en un receptor de dos cadenas con
+    la misma numeración, el contacto con B:ASP1 se rotulaba con el nombre de
+    A:ALA1. Ahora la clave lleva la cadena (columna 22). Si un mismo (cadena,
+    número) trae dos nombres —códigos de inserción, que Molecular Nodes no
+    distingue—, el nombre no es inequívoco y queda «?».
+
+    Puro (sin bpy): se puede probar sin Blender.
+    """
+    out: dict[tuple[str, int], str] = {}
+    ambiguos: set[tuple[str, int]] = set()
+    try:
+        with open(ruta_pdb, encoding="utf-8", errors="ignore") as fh:
+            for L in fh:
+                if not L.startswith(("ATOM", "HETATM")):
+                    continue
+                try:
+                    clave = (L[21:22] or " ", int(L[22:26]))
+                except ValueError:
+                    continue
+                nombre = L[17:20].strip()
+                if clave in out and out[clave] != nombre:
+                    ambiguos.add(clave)
+                out.setdefault(clave, nombre)
+    except OSError:
+        pass
+    for clave in ambiguos:
+        out[clave] = "?"
+    return out
+
+
+def nombre_de_residuo(nombres, cadena: str, numero: int) -> str:
+    """El nombre del residuo de ESA cadena y número, o «?» si no consta o es ambiguo."""
+    return (nombres or {}).get((cadena, numero), "?")
+
+
 def medir(receptor_mol, sujeto_mol, centro, *, nombres=None, cadenas=None,
           preferidos=(), max_por_tipo: int = MAX_POR_TIPO):
     """(elegidos, n_polares_medidos, n_apolares_medidos) de un ligando en su pose."""

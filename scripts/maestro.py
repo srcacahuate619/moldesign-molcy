@@ -203,7 +203,8 @@ def escena_para_fotos(paq, guion, formato, mod_sujeto, ok, razon, destino: Path,
         "control_de_calidad": informe.como_lista(),
         "forzado": bool(forzado),
         "decisiones_del_contrato": acta.decisiones,
-        "presentacion": {"titulo": rotulos.titulo_pantalla(paq.pdb_id, paq.nombre, paq.resolucion)[0],
+        "presentacion": {"titulo": rotulos.titulo_pantalla(paq.pdb_id, paq.nombre, paq.resolucion,
+                                                           seccion=paq.seccion)[0],
                          "experimental_look": bool(experimental)},
         "ajustes": ({"entrada": ajustes, "resueltos": resueltos} if resueltos else None),
         "notas": rec.notas + montado.notas,
@@ -620,7 +621,7 @@ def main() -> int:
         if cfg_tit:
             texto_titulo, escala_titulo = rotulos.titulo_pantalla(
                 paq.pdb_id, paq.nombre, paq.resolucion,
-                base=formato.escala_texto * 0.78)
+                base=formato.escala_texto * 0.78, seccion=paq.seccion)
             t = rotulos.crear_pantalla(
                 "titulo", texto_titulo,
                 rig.camara, proto, esquina="inferior_izquierda",
@@ -820,7 +821,7 @@ def main() -> int:
         "forzado": bool(a.forzar),
         "presentacion": {
             "titulo": rotulos.titulo_pantalla(
-                paq.pdb_id, paq.nombre, paq.resolucion)[0],
+                paq.pdb_id, paq.nombre, paq.resolucion, seccion=paq.seccion)[0],
             "experimental_look": bool(experimental),
         },
         "capa_titulo": capa_titulo,

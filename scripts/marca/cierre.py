@@ -54,7 +54,7 @@ MARCA = SCRIPTS.parent / "moldesign" / "assets" / "marca"
 # ── identidad (de la web de MolDesign) ───────────────────────────────────
 NOMBRE = ("Mol", "Design")
 LEMA = lema_del_idioma()
-WEB = "molecule-design.amezcua-dev.com"
+WEB = "moldesign.amezcua-dev.com"
 
 
 def _fuente_del_sistema(*candidatas: str) -> Path | None:

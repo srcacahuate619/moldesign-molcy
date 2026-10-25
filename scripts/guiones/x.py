@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 
 from nucleo.horneado import ss
+from nucleo.interacciones import MAX_POR_TIPO
 from variables.guion import Beat
 
 NOMBRE = "x"
@@ -551,7 +552,10 @@ def rotulos_datos(rangos, formato, fps, montado):
         af = pose.get("afinidad")
         valor = f"{af:.2f} kcal/mol" if isinstance(af, (int, float)) else ""
         cuenta = pose.get("contactos", {})
-        lectura = (f"\nPOLARES {cuenta.get('polares', 0)}  |  "
+        # SCI-A-031: son los contactos DIBUJADOS, recortados a MAX_POR_TIPO por clase,
+        # no todos los medidos; el rótulo lo dice.
+        lectura = (f"\nDIBUJADOS (MAX. {MAX_POR_TIPO} POR CLASE)"
+                   f"\nPOLARES {cuenta.get('polares', 0)}  |  "
                    f"APOLARES {cuenta.get('hidrofobicos', 0)}"
                    if montado.extra.get("contactos_visibles", True) else "")
         rmsd = pose.get("rmsd_vina_inferior_a")

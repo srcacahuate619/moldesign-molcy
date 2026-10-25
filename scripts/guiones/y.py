@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 
 from nucleo.horneado import ss
+from nucleo.interacciones import MAX_POR_TIPO
 from variables.guion import Beat
 
 NOMBRE = "y"
@@ -366,8 +367,15 @@ def _diedros(torsiones):
 
 
 def _controles(controles, nombre):
-    """«CONTROLES …  a/n» y los que fallan; «no evaluados» si no se evaluó."""
-    if not controles or controles.get("pruebas") in (None, 0):
+    """«CONTROLES …  a/n», los que fallan y los que no se evaluaron.
+
+    SCI-A-027: desde que el exportador conserva los controles de una etapa en
+    `failed` o `review`, aquí llegan los cuatro veredictos. «NO EVALUADOS» se
+    reserva para lo que el validador no midió; un fallo medido se nombra, y una
+    batería parcial dice cuántos controles quedaron sin evaluar.
+    """
+    if not controles or controles.get("estado") == "not_evaluated" \
+            or controles.get("pruebas") in (None, 0):
         return f"{nombre}: NO EVALUADOS"
     fallos = controles.get("fallos") or []
     linea = f"{nombre} {controles['aprobadas']}/{controles['pruebas']}"
@@ -375,6 +383,11 @@ def _controles(controles, nombre):
         visibles = ", ".join(str(f).upper() for f in fallos[:MAX_FALLOS])
         resto = f" +{len(fallos) - MAX_FALLOS}" if len(fallos) > MAX_FALLOS else ""
         linea += f"\nFALLAN: {visibles}{resto}"
+    sin_evaluar = controles.get("no_evaluados") or 0
+    if sin_evaluar:
+        linea += f"\n{sin_evaluar} SIN EVALUAR"
+    elif controles.get("estado") == "review" and not fallos:
+        linea += "\nREVISION NECESARIA"
     return linea
 
 
@@ -426,7 +439,10 @@ def rotulos_datos(rangos, formato, fps, montado):
               ventana)
     for pose, ventana in zip(poses, _ventanas_poses(rangos, len(poses))):
         cuenta = pose.get("contactos", {})
-        lectura = (f"\nPOLARES {cuenta.get('polares', 0)}  |  "
+        # SCI-A-031: son los contactos DIBUJADOS, recortados a MAX_POR_TIPO por clase,
+        # no todos los medidos; el rótulo lo dice.
+        lectura = (f"\nDIBUJADOS (MAX. {MAX_POR_TIPO} POR CLASE)"
+                   f"\nPOLARES {cuenta.get('polares', 0)}  |  "
                    f"APOLARES {cuenta.get('hidrofobicos', 0)}"
                    if extra.get("contactos_visibles", True) else "")
         poner(f"y_pose_{pose['rank']}",

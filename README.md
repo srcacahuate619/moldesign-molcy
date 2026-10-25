@@ -1,6 +1,6 @@
 # Molcy — motor de vídeo de MolDesign
 
-*English, in short: Molcy is the video engine that ships inside [MolDesign](https://molecule-design.amezcua-dev.com). It is a set of Python scripts that run **inside
+*English, in short: Molcy is the video engine that ships inside [MolDesign](https://moldesign.amezcua-dev.com). It is a set of Python scripts that run **inside
 Blender** (`blender -b --python scripts/maestro.py`), use the Blender API (`bpy`) and the Molecular Nodes extension, and turn a MolDesign scene package into a short
 scientific video. License: GPL-3.0-or-later.*
 

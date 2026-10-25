@@ -103,8 +103,11 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     m = Montado()
     resumen = d.get("resumen") or {}
     m.notas += [
-        "Las conformaciones son geometrias discretas de entrada (ETKDG + MMFF), no "
-        "una pelicula de rotaciones. Se alinearon rigidamente a la mejor pose solo "
+        # SCI-A-025: no todas se minimizan con MMFF (sin parametros, quedan sin
+        # minimizar); el metodo de cada una va en el acta (`conformeros`).
+        "Las conformaciones son geometrias discretas de entrada generadas con ETKDG "
+        "(cada una declara en el acta si se minimizo con MMFF94 o quedo sin minimizar), "
+        "no una pelicula de rotaciones. Se alinearon rigidamente a la mejor pose solo "
         "para compararlas: Vina recibio cada una sin alinear y busco poses "
         "independientes en la misma caja. El corte de una a otra no es movimiento "
         "fisico.",
@@ -216,7 +219,9 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                    "linea y su rotulo de residuo, clase y distancia. " + interacciones.NOTA)
     m.medido.update(
         caja_a=d["caja"], resumen=resumen, validacion=d.get("validacion"),
-        conformeros=[{k: c.get(k) for k in ("indice", "semilla", "energia_mmff",
+        # `minimizacion`: MMFF94, UFF, sin_minimizar o None si el exportador no la
+        # declara (SCI-A-025); la nota de arriba remite aqui.
+        conformeros=[{k: c.get(k) for k in ("indice", "semilla", "energia_mmff", "minimizacion",
                                             "mejor_afinidad_kcal_mol", "poses_entregadas")}
                      for c in d["conformeros"]],
         poses_entregadas=[{k: p.get(k) for k in ("rank", "conformero", "rank_local",
