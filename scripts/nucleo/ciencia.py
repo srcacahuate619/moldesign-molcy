@@ -108,6 +108,11 @@ class Paquete:
         return self.datos["receptor"].get("resolucion_a")
 
     @property
+    def seccion(self) -> str | None:
+        """La sección del catálogo que declaró el backend («demostracion», «verificado»), o None."""
+        return self.datos["receptor"].get("seccion")
+
+    @property
     def cadena_principal(self) -> str:
         return self.datos["receptor"].get("cadena_principal") or "A"
 

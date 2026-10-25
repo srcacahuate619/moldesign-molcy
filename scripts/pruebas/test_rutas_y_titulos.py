@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from nucleo.ciencia import Paquete
 from nucleo.rutas import carpeta_de_caso
 from variables.titulos import nombre_legible, titulo_pantalla
 
@@ -68,3 +71,33 @@ def test_titulo_curado_y_dos_lineas():
         "MECHANISM FOR ACTIVATING THE ATPASE CATALYTIC CENTER", 2.3)
     assert len(texto.split("\n")) <= 2
     assert 0.0 < escala <= 0.78
+
+
+def test_seccion_demostracion_se_rotula_en_el_idioma_del_cierre():
+    texto, _ = titulo_pantalla("1HSG", "HIV-1 PROTEASE", 2.0, seccion="demostracion", idioma="es")
+    assert texto.split("\n")[-1] == "Demostración"
+    texto, _ = titulo_pantalla("1HSG", "HIV-1 PROTEASE", 2.0, seccion="demostracion", idioma="en")
+    assert texto.split("\n")[-1] == "Demonstration"
+
+
+def test_sin_seccion_o_verificado_el_titulo_no_cambia():
+    base = titulo_pantalla("1HSG", "HIV-1 PROTEASE", 2.0)
+    assert titulo_pantalla("1HSG", "HIV-1 PROTEASE", 2.0, seccion=None) == base
+    assert titulo_pantalla("1HSG", "HIV-1 PROTEASE", 2.0, seccion="verificado", idioma="es") == base
+    assert "Demostración" not in base[0]
+
+
+def test_la_etiqueta_se_añade_sin_recortar_el_nombre():
+    texto, escala = titulo_pantalla(
+        "1EI1", "DIMERIZATION OF E. COLI DNA GYRASE B PROVIDES A STRUCTURAL "
+        "MECHANISM FOR ACTIVATING THE ATPASE CATALYTIC CENTER", 2.3,
+        seccion="demostracion", idioma="es")
+    assert texto.split("\n")[-1] == "Demostración"
+    assert len(texto.split("\n")) == 3
+    assert 0.0 < escala <= 0.78
+
+
+def test_el_paquete_declara_su_seccion_o_no_la_declara():
+    assert Paquete(raiz=Path("."), datos={"receptor": {"pdb_id": "1HSG", "seccion": "demostracion"}}).seccion \
+        == "demostracion"
+    assert Paquete(raiz=Path("."), datos={"receptor": {"pdb_id": "1HSG"}}).seccion is None
