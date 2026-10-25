@@ -1,7 +1,7 @@
 """Qué cambia de un fotograma a otro: si nada, su render ya existe.
 
 Todo lo que se mueve en estas escenas está horneado como claves por fotograma
-(cámara, luces, materiales, visibilidad). La «firma» de un fotograma es el valor
+(cámara, luces, materiales, visibilidad y deformaciones por shape keys). La «firma» de un fotograma es el valor
 de todas esas curvas en él; dos fotogramas con la misma firma dan la misma imagen
 (EEVEE es determinista) y basta con rendir uno. `variables.pausas.representantes`
 decide cuál.
@@ -53,7 +53,7 @@ def _curvas(idb) -> list:
 def _bloques():
     for coleccion in (bpy.data.objects, bpy.data.cameras, bpy.data.lights, bpy.data.materials,
                       bpy.data.node_groups, bpy.data.worlds, bpy.data.scenes, bpy.data.curves,
-                      bpy.data.meshes):
+                      bpy.data.meshes, getattr(bpy.data, "shape_keys", ())):
         for idb in coleccion:
             yield idb
             nt = getattr(idb, "node_tree", None)

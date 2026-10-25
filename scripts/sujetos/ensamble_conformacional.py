@@ -4,7 +4,10 @@ Todo lo que se dibuja sale de `ensamble.json` del paquete, que produce
 molDesign-build a partir de la corrida guardada: las conformaciones de entrada
 (las que de verdad aportaron poses entregadas), las poses entregadas por la
 piscina del ensamble y los controles físicos que el producto aplicó a cada una.
-Nada se inventa aquí: sin ese contrato verificado, la escena se abstiene.
+Sin ese contrato verificado, la escena se abstiene. El prototipo explícito
+ensamble_fluido puede añadir una excursión GEOMÉTRICA ILUSTRATIVA cerrada desde
+una entrada con rig verificado; no es una geometría medida ni una trayectoria,
+y nunca recibe energía, contactos o controles físicos de una pose.
 
 Qué es y qué NO es lo que se ve (el contrato lo declara y el acta lo repite):
 
@@ -121,6 +124,9 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
     # conformaciones de entrada ------------------------------------------------
     m.extra["conformeros"] = []
     m.extra["puntos_conformeros"] = []
+    m.extra["receptor_contexto"] = ctx.receptor.objeto.name
+    m.extra["rigs_torsionales"] = {}
+    m.extra["rigs_no_disponibles"] = {}
     for c in d["conformeros"]:
         i = c["indice"]
         mol = _cargar_molecula(mn, arte, inferir_enlaces, paq.ruta_ensamble(c["archivo"]),
@@ -131,6 +137,28 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
             "poses_entregadas": c.get("poses_entregadas"),
             "mejor_afinidad": c.get("mejor_afinidad_kcal_mol")})
         m.extra["puntos_conformeros"].append(arte.puntos_evaluados(mol.object))
+
+        if c.get("rig_torsional"):
+            from nucleo.torsiones import validar_rig, RigNoDisponible
+            try:
+                sdf = paq.ruta_ensamble(c.get("sdf", ""))
+                if sdf is None or _sha(sdf) != c.get("sdf_sha256"):
+                    raise RigNoDisponible("el SDF de entrada no coincide con su hash")
+                rig = validar_rig(c["rig_torsional"], sdf_sha256=c["sdf_sha256"])
+                lineas = paq.ruta_ensamble(c["archivo"]).read_text(encoding="utf-8").splitlines()
+                pdb = [linea for linea in lineas if linea.startswith(("ATOM  ", "HETATM"))]
+                identidad = [(linea[12:16].strip(), linea[76:78].strip().upper()) for linea in pdb]
+                esperada = [(at["id"], at["elemento"].upper()) for at in rig["atomos"]]
+                if identidad != esperada:
+                    raise RigNoDisponible("los IDs o elementos del PDB no son los del rig")
+                from nucleo.torsiones import validar_coordenadas
+                validar_coordenadas(rig, [(float(l[30:38]), float(l[38:46]), float(l[46:54]))
+                                         for l in pdb])
+                m.extra["rigs_torsionales"][i] = {"nombre": mol.object.name, "rig": rig}
+            except (RigNoDisponible, OSError, KeyError, ValueError) as exc:
+                m.extra["rigs_no_disponibles"][i] = str(exc)
+        else:
+            m.extra["rigs_no_disponibles"][i] = "el paquete no trae un rig torsional"
 
     # poses entregadas, en el orden de la piscina ----------------------------
     poses = sorted(d["poses"], key=lambda p: p["rank"])

@@ -97,6 +97,27 @@ def test_la_etiqueta_se_añade_sin_recortar_el_nombre():
     assert 0.0 < escala <= 0.78
 
 
+def test_un_titulo_propio_no_quita_la_etiqueta_de_demostracion():
+    # El alias (controles de presentación) sustituye al nombre, pero el vídeo sigue diciendo lo que dice la aplicación.
+    alias = "Mi estudio del ligando flexible con una descripcion editorial extensa de ochenta"
+    for idioma, etiqueta in (("es", "Demostración"), ("en", "Demonstration")):
+        texto, escala = titulo_pantalla("1HSG", "HIV-1 PROTEASE", 2.0, seccion="demostracion", idioma=idioma, alias=alias)
+        assert texto.splitlines()[-1] == etiqueta
+        assert " ".join(alias.split()) in " ".join(texto.split())
+        assert 0.0 < escala <= 0.78
+    sin_seccion, _ = titulo_pantalla("1HSG", "HIV-1 PROTEASE", 2.0, alias=alias)
+    assert "Demostración" not in sin_seccion and "Demonstration" not in sin_seccion
+
+
+def test_maestro_pasa_la_seccion_en_cada_titulo():
+    import ast
+    arbol = ast.parse((Path(__file__).resolve().parents[1] / "maestro.py").read_text(encoding="utf-8"))
+    llamadas = [n for n in ast.walk(arbol) if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "titulo_pantalla"]
+    assert len(llamadas) == 3
+    for llamada in llamadas:
+        assert {k.arg for k in llamada.keywords} >= {"seccion", "alias"}, ast.unparse(llamada)
+
+
 def test_el_paquete_declara_su_seccion_o_no_la_declara():
     assert Paquete(raiz=Path("."), datos={"receptor": {"pdb_id": "1HSG", "seccion": "demostracion"}}).seccion \
         == "demostracion"

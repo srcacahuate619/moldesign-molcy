@@ -174,18 +174,21 @@ ETIQUETAS_DE_SECCION = {"demostracion": {"es": "Demostración", "en": "Demonstra
 
 def titulo_pantalla(pdb_id: str, nombre: str, resolucion=None,
                     base: float = 0.78, ancho: int = 42,
-                    seccion: str | None = None, idioma: str | None = None) -> tuple[str, float]:
+                    seccion: str | None = None, idioma: str | None = None, *,
+                    alias: str | None = None) -> tuple[str, float]:
     """Devuelve texto y escala seguros para el rotulo inferior.
 
     Con `seccion="demostracion"` añade una línea con la etiqueta del catálogo en el idioma del
     cierre (`marca.idioma`), para que el título y el vídeo digan lo mismo que la aplicación.
+    Un `alias` (el título que eligió el usuario) sustituye al nombre y no se recorta, pero no
+    quita esa línea: el título propio no puede ocultar que el receptor es de demostración.
     """
-    corto = NOMBRES_CURADOS.get(str(pdb_id).upper(), nombre_legible(nombre))
+    corto = alias if alias is not None else NOMBRES_CURADOS.get(str(pdb_id).upper(), nombre_legible(nombre))
     res = f" · {resolucion} Å" if resolucion else ""
     completo = f"{corto}   ·   {pdb_id}{res}"
-    lineas = textwrap.wrap(completo, width=ancho, break_long_words=False,
+    lineas = textwrap.wrap(completo, width=ancho, break_long_words=alias is not None,
                            break_on_hyphens=False) or [completo]
-    if len(lineas) > 2:
+    if len(lineas) > 2 and alias is None:
         lineas = lineas[:2]
         lineas[-1] = textwrap.shorten(lineas[-1], width=ancho,
                                       placeholder="…")

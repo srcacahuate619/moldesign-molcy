@@ -150,7 +150,8 @@ def preparar(a) -> dict:
     blender(a.blender, ["--factory-startup", "--addons", ADDON_MN,
                         "--python", str(AQUI / "maestro.py"), "--", a.pdb,
                         "--guion", a.guion, "--sujeto", a.sujeto, "--formato", a.formato,
-                        "--sufijo", a.sufijo, "--experimental-look", "--fotos"],
+                        "--sufijo", a.sufijo, "--experimental-look", "--fotos"]
+                        + (["--ajustes", a.ajustes] if getattr(a, "ajustes", "") else []),
             "FOTOS_ESCENA_OK")
     construccion = round(time.time() - t0, 1)
     escena_json = carpeta / f"escena_fotos{sufijo}.json"
@@ -230,6 +231,7 @@ def main(argv=None) -> int:
     p.add_argument("--sujeto", default="ligando_cocristal")
     p.add_argument("--formato", required=True)
     p.add_argument("--sufijo", default="")
+    p.add_argument("--ajustes", default="")
     p.add_argument("--miniatura", type=int, default=MINIATURA)
     p.add_argument("--muestras", type=int, default=MUESTRAS_MINIATURA)
     t = sub.add_parser("tomar")

@@ -158,7 +158,7 @@ def validar(ajustes: dict) -> dict:
         # Con su propio mensaje: «mandos desconocidos» sugeriria que basta con escribirlo bien.
         raise ValueError("El cierre de MolDesign es obligatorio en todo video y no se puede quitar ni ajustar")
     raros = (set(barras) - set(_BARRAS)) | (set(inter) - _INTERRUPTORES) | \
-        (set(ajustes) - {"barras", "interruptores"})
+        (set(ajustes) - {"barras", "interruptores", "presentacion", "ensamble_fluido"})
     if raros:
         raise ValueError(f"mandos desconocidos: {', '.join(sorted(raros))}")
     for k, v in barras.items():
@@ -167,11 +167,27 @@ def validar(ajustes: dict) -> dict:
     for k, v in inter.items():
         if not isinstance(v, bool):
             raise ValueError(f"el interruptor {k} tiene que ser si/no (llego {v!r})")
-    return {"barras": barras, "interruptores": inter}
+    out = {"barras": barras, "interruptores": inter}
+    from variables import presentacion
+    if "presentacion" in ajustes:
+        out["presentacion"] = presentacion.validar(ajustes["presentacion"])
+    if "ensamble_fluido" in ajustes:
+        out["ensamble_fluido"] = presentacion.validar_ensamble(ajustes["ensamble_fluido"])
+    return out
 
 
 def leer(ruta: str | Path) -> dict:
     return validar(json.loads(Path(ruta).read_text(encoding="utf-8")))
+
+
+
+def leer_entrada(ruta: str | Path) -> dict:
+    """Conserva la receta exacta; la normalización sólo va a resueltos del acta."""
+    entrada = json.loads(Path(ruta).read_text(encoding="utf-8-sig"))
+    if not isinstance(entrada, dict):
+        raise ValueError("los ajustes deben ser un objeto")
+    validar(entrada)
+    return entrada
 
 
 def aplicar(formato, ajustes: dict | None):
@@ -221,6 +237,15 @@ def aplicar(formato, ajustes: dict | None):
             cambios["sello_procedencia"] = v
         else:                                   # contactos, look_v4
             extras[k] = v
+    if "presentacion" in a:
+        visual = a["presentacion"]
+        extras["presentacion"] = visual
+        extras["contactos"] = visual["contactos"]
+        cambios["etiquetas_3d"] = visual["etiquetas"]
+        resueltos["presentacion"] = visual
+    if "ensamble_fluido" in a:
+        extras["ensamble_fluido"] = a["ensamble_fluido"]
+        resueltos["ensamble_fluido"] = a["ensamble_fluido"]
     return replace(formato, **cambios), extras, resueltos
 
 
