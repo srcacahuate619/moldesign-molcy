@@ -99,7 +99,9 @@ def aplicar_montado(datos, rec, montado):
     """Después de crear varillas; no modifica geometría ni valores medidos."""
     tintar_material(rec.mat_cartoon, datos["color_receptor"])
     tintar_material(rec.mat_hotspots, datos["color_residuos"])
-    for material, clase in zip(montado.extra.get("materiales_contacto") or montado.materiales_secundarios, ("polar", "apolar")):
+    # Sólo los materiales de las LÍNEAS: en `x`, `materiales_secundarios` son los de
+    # las poses y no se tiñen con el color de una clase de interacción.
+    for material, clase in zip(montado.extra.get("materiales_contacto") or (), ("polar", "apolar")):
         tintar_material(material, datos["colores_lineas"][clase])
     montado.extra["contactos_visibles"] = datos["contactos"]
     montado.extra["muestra_anterior_visible"] = datos["muestra_anterior"]

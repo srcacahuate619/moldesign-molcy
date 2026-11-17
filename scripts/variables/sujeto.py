@@ -55,9 +55,15 @@ class Montado:
     dianas_generales: list[Vector] = field(default_factory=list)
     #: (id, texto, posicion) para las etiquetas ancladas.
     anclas: list[tuple[str, str, Vector]] = field(default_factory=list)
-    #: Objetos que aparecen DESPUES del sujeto (contactos): se funden aparte.
+    #: Objetos que aparecen DESPUES del sujeto: se funden aparte. En `sitio_activo`
+    #: son las lineas de contacto; en `x`, las poses de Vina. No es lo que retira el
+    #: interruptor `contactos`: eso es `lineas_contacto`.
     secundarios: list[Any] = field(default_factory=list)
     materiales_secundarios: list[Any] = field(default_factory=list)
+    #: Las lineas de contacto que el sujeto dibujo, y nada mas: lo unico que se
+    #: retira (con sus rotulos `dist*`) si se apagan los contactos. Una linea puede
+    #: estar tambien en `secundarios`. Sus materiales, en `extra["materiales_contacto"]`.
+    lineas_contacto: list[Any] = field(default_factory=list)
     #: Datos para el GUION (p.ej. la traza aceptada que anima el caminante):
     #: nombres de objetos y coordenadas de mundo, nada de medidas.
     extra: dict = field(default_factory=dict)
@@ -68,6 +74,35 @@ class Montado:
 
 class SujetoNoDisponible(RuntimeError):
     """El paquete de escena no trae lo que este sujeto necesita."""
+
+
+def apagar_contactos(montado: Montado, retirar) -> dict[str, int]:
+    """El interruptor `contactos` apagado: no se dibujan las lineas ni sus rotulos.
+
+    Se retiran SOLO las lineas que el sujeto declaro en `lineas_contacto` y las
+    anclas `dist*` (sus rotulos de distancia). El ligando, las poses y lo medido
+    se quedan: apagar una capa no cambia lo que la escena afirma
+    (`variables/controles.py`). Antes se borraba `secundarios`, que en la escena
+    `x` son las poses de Vina: el ligando desaparecia y las lineas seguian.
+
+    `retirar(objeto)` lo quita de la escena (en Blender,
+    `bpy.data.objects.remove(o, do_unlink=True)`); se recibe como argumento para
+    que esto se pruebe sin Blender. Devuelve cuantas lineas y rotulos se quitaron.
+    """
+    lineas = list(montado.lineas_contacto)
+    # Primero se dejan de citar y despues se borran: un objeto ya borrado no se
+    # puede ni comparar (Blender lanza ReferenceError al tocarlo).
+    montado.secundarios[:] = [o for o in montado.secundarios if o not in lineas]
+    montado.objetos[:] = [o for o in montado.objetos if o not in lineas]
+    de_lineas = list(montado.extra.get("materiales_contacto") or ())
+    montado.materiales_secundarios[:] = [m for m in montado.materiales_secundarios
+                                         if m not in de_lineas]
+    antes = len(montado.anclas)
+    montado.anclas[:] = [a for a in montado.anclas if not a[0].startswith("dist")]
+    montado.lineas_contacto.clear()
+    for o in lineas:
+        retirar(o)
+    return {"lineas": len(lineas), "rotulos": antes - len(montado.anclas)}
 
 
 # ── registro ─────────────────────────────────────────────────────────────

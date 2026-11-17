@@ -71,6 +71,7 @@ def _interacciones(paq, ctx, lig, centro, m) -> None:
         return
     mat_polar, mat_apolar = interacciones.materiales_de_linea(ctx.arte, f"{paq.pdb_id}_")
     m.materiales_secundarios += [mat_polar, mat_apolar]
+    m.extra["materiales_contacto"] = [mat_polar, mat_apolar]
     multicadena = len(cadenas) > 1
     colores = {}
     for i, c in enumerate(elegidos):
@@ -78,6 +79,7 @@ def _interacciones(paq, ctx, lig, centro, m) -> None:
         linea = contactos.dibujar(f"Contacto_{i}_{interacciones.tipo(c)}", c, material)
         if linea is not None:
             m.secundarios.append(linea)
+            m.lineas_contacto.append(linea)
         # `dist*`: el motor las trata como rótulo de distancia y las retira con las líneas.
         m.anclas.append((f"dist{i}", interacciones.texto(c, multicadena), c.medio))
         colores[f"dist{i}"] = interacciones.color(c)

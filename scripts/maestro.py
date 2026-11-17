@@ -431,16 +431,13 @@ def main() -> int:
         montado.extra["contactos_visibles"] = extras["contactos"]
         if not extras["contactos"]:
             montado.notas.append("Ajuste visual: contactos no dibujados; mediciones conservadas.")
-        if not extras["contactos"] and montado.secundarios:
             # Apagar la capa no cambia lo medido (sigue en el acta): solo no se
-            # dibujan las lineas ni sus etiquetas de distancia.
-            for o in montado.secundarios:
-                bpy.data.objects.remove(o, do_unlink=True)
-            montado.secundarios.clear()
-            montado.materiales_secundarios.clear()
-            montado.anclas[:] = [x for x in montado.anclas
-                                 if not x[0].startswith("dist")]
-            print("AJUSTE: lineas de contacto apagadas")
+            # dibujan las lineas ni sus etiquetas de distancia. El ligando y las
+            # poses se quedan (`sujeto.apagar_contactos`).
+            quitado = sujeto.apagar_contactos(
+                montado, lambda o: bpy.data.objects.remove(o, do_unlink=True))
+            print(f"AJUSTE: lineas de contacto apagadas ({quitado['lineas']} lineas, "
+                  f"{quitado['rotulos']} rotulos de distancia)")
     else:
         acta.anota(sujeto=mod_sujeto.ID, decision="omitido", razon=razon)
         print(f"SUJETO NO DISPONIBLE: {mod_sujeto.ID} — {razon}")

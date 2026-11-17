@@ -195,7 +195,9 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
         obj = contactos.malla_punteada(f"Contacto_{i}", c.a, c.b, mat_linea)
         if obj is not None:
             m.secundarios.append(obj)
+            m.lineas_contacto.append(obj)
     m.materiales_secundarios.append(mat_linea)
+    m.extra["materiales_contacto"] = [mat_linea]
 
     for i, c in enumerate(elegidos[:MAX_ETIQUETAS_DISTANCIA]):
         m.anclas.append((f"dist{i}", c.etiqueta, c.medio))

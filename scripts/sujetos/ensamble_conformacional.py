@@ -194,6 +194,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                 lineas.append(linea.name)
                 # Sólo las LÍNEAS son «contactos»: si se apagan, las poses se quedan.
                 m.secundarios.append(linea)
+                m.lineas_contacto.append(linea)
             ident = f"dist_p{rank}_{j}"
             m.anclas.append((ident, interacciones.texto(contacto, multicadena),
                              contacto.medio))

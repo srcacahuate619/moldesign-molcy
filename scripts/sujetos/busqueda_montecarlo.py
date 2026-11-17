@@ -316,6 +316,8 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
         if mat:
             arte.realzar_protagonista(mat)
         obj = mol.object
+        # Las poses entran después de la caja (`secundarios`), pero NO son
+        # contactos: apagar las líneas no las toca (`lineas_contacto`).
         m.secundarios.append(obj)
         m.extra["poses"].append({"nombre": obj.name, "rank": p["rank"],
                                   "afinidad": p.get("afinidad_kcal_mol"),
@@ -337,6 +339,7 @@ def cargar(paq, ctx: Contexto | None = None) -> Montado:
                 f"{pref}Pose{p['rank']}_{contacto.tipo}_{j}", contacto, material)
             if linea is not None:
                 lineas.append(linea.name)
+                m.lineas_contacto.append(linea)
             # Rótulo de la línea: residuo, clase y distancia (polar o apolar).
             # `dist*`: el motor las retira con las líneas si se apagan los contactos.
             ident = f"dist_p{p['rank']}_{j}"
