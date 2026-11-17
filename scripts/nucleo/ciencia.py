@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -268,11 +269,50 @@ class Paquete:
     #: ALA solo un metilo: etiquetarlos deja la etiqueta apuntando al vacio.
     SIN_CADENA_LATERAL = {"GLY", "ALA"}
 
+    @cached_property
+    def residuos_preparados(self) -> frozenset[tuple[str, int, str]] | None:
+        """(cadena, numero, resname) de cada residuo de `prepared.pdb`; None sin archivo."""
+        ruta = self.ruta("prepared")
+        if ruta is None:
+            return None
+        vistos = set()
+        with open(ruta, encoding="utf-8", errors="replace") as fh:
+            for linea in fh:
+                if linea.startswith(("ATOM  ", "HETATM")):
+                    try:
+                        vistos.add((linea[21], int(linea[22:26]), linea[17:20].strip().upper()))
+                    except ValueError:
+                        continue
+        return frozenset(vistos)
+
+    def hotspot_presente(self, h: dict) -> bool:
+        """El hotspot del catalogo es un residuo de `prepared.pdb` (cadena, numero y nombre).
+
+        El catalogo lista a veces residuos de una cadena que la preparacion quito
+        (la companera de una interfaz, el ADN de 7KQM) y el exportador los marcaba
+        `parseado`. Buscados solo por numero caian en OTRO residuo de otra cadena:
+        en 9QA4 el TRP95 de la C se dibujaba sobre el ARG95 de la A, a 41 A del
+        sitio. Si el exportador ya lo dice (`en_preparado`), manda su veredicto.
+        """
+        if h.get("en_preparado") is False:
+            return False
+        residuos = self.residuos_preparados
+        if residuos is None:
+            return True
+        return (str(h["cadena"]), int(h["numero"]), str(h["resname"]).upper()) in residuos
+
+    def hotspots_ausentes(self) -> list[str]:
+        """Nombres de los hotspots del catalogo que NO estan en `prepared.pdb`."""
+        return [h["nombre"] for h in self.datos["resaltar"]["hotspots"]
+                if h.get("parseado") and not self.hotspot_presente(h)]
+
     def hotspots(self, cuantos: int | None = None,
                  solo_dibujables: bool = True) -> list[Hotspot]:
         out = []
         for h in self.datos["resaltar"]["hotspots"]:
             if not h.get("parseado"):
+                continue
+            if not self.hotspot_presente(h):
                 continue
             if solo_dibujables and h["resname"].upper() in self.SIN_CADENA_LATERAL:
                 continue

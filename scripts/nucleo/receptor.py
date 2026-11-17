@@ -86,6 +86,11 @@ def montar(paq: Paquete, arte_importado: dict, n_hotspots: int = 3) -> Receptor:
     # `poner_varillas()`: hay que esperar a saber a que residuos apuntan las
     # lineas de contacto para dibujarlos tambien. Ver el fallo de 1HWK.
     r.hotspots = paq.hotspots(n_hotspots)
+    ausentes = paq.hotspots_ausentes()
+    if ausentes:
+        r.notas.append(
+            f"{len(ausentes)} hotspot(s) del catalogo no estan en prepared.pdb (cadena "
+            f"quitada al preparar o residuo ausente) y no se dibujan: {', '.join(ausentes)}")
     try:
         import numpy as _np
         n_h = int((r.molecula.named_attribute("atomic_number") == 1).sum())
@@ -121,7 +126,12 @@ def poner_varillas(r: Receptor, paq: Paquete, extra_resids=()) -> list[int]:
     numeros = {h.numero for h in r.hotspots} | {int(x) for x in extra_resids}
     if not numeros:
         return []
-    sel = " or ".join(f"(resid {n})" for n in sorted(numeros))
+    # Cada hotspot en SU cadena: en un receptor de varias cadenas, `resid N` solo
+    # resaltaba tambien el residuo N de las demas. Los residuos que reciben una
+    # linea llegan sin cadena (`residuos_de_contacto`) y siguen por numero.
+    partes = {f"(resid {h.numero} and chainID {h.cadena})" for h in r.hotspots}
+    partes |= {f"(resid {int(n)})" for n in extra_resids}
+    sel = " or ".join(sorted(partes))
     # Fuera los hidrogenos: `prepared.pdb` los trae (449 en 1BN1, 966 en 1CX2)
     # y a esas resoluciones estan RECONSTRUIDOS. El contrato obliga a
     # declararlos si aparecen; ademas se leian como esferas blancas sueltas que
@@ -162,14 +172,21 @@ def centro_de_residuo(molecula, numero: int, cadena_idx: int | None = None) -> V
         lado = molecula.named_attribute("is_side_chain").astype(bool)
     except Exception:
         lado = np.ones(len(rid), dtype=bool)
-    sel = (rid == numero) & lado
+    de_la_cadena = None
     if cadena_idx is not None:
         try:
-            sel = sel & (molecula.named_attribute("chain_id") == cadena_idx)
+            de_la_cadena = molecula.named_attribute("chain_id") == cadena_idx
         except Exception:
-            pass
+            de_la_cadena = None
+    sel = (rid == numero) & lado
+    if de_la_cadena is not None:
+        sel = sel & de_la_cadena
     if not sel.any():
+        # Sin cadena lateral (o sin atributo): el residuo entero, pero NUNCA el
+        # mismo numero en otra cadena, que es otro residuo.
         sel = rid == numero
+        if de_la_cadena is not None:
+            sel = sel & de_la_cadena
     if not sel.any():
         return None
     return Vector(pos[sel].mean(axis=0).tolist())

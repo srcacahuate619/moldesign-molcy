@@ -55,7 +55,13 @@ def revisar(medidas: dict, formato, guion=None) -> Informe:
     permite_alejamiento = bool(getattr(guion, "QC_PERMITE_ALEJAMIENTO", False))
     factor_dianas = float(getattr(guion, "QC_DIANAS_FACTOR", 0.35))
 
-    if D0 and D1 and D0 >= D1 * 0.85 and not permite_alejamiento:
+    # Sin aproximacion no hay primer plano que comparar con el general: el bucle
+    # (`previsualizacion`) solo orbita a la distancia general. Ahi la regla
+    # rechazaba los receptores pequenos, cuyo sitio ocupa casi toda la proteina
+    # (1CBR, 2FR3, 4K78: 10 del catalogo), sin nada mal en el video.
+    papeles = getattr(formato, "papeles", None)
+    aproxima = not formato.bucle and (papeles is None or "aproximar" in papeles)
+    if aproxima and D0 and D1 and D0 >= D1 * 0.85 and not permite_alejamiento:
         inf.avisos.append(Aviso(
             "fatal", "camara_se_aleja",
             f"la distancia de primer plano ({D0:.2f}) no es menor que la del "
